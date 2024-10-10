@@ -1,0 +1,81 @@
+name: Deploy Telegram Bot to Azure Container App
+
+on:
+  release:
+    types: [prereleased, released]
+
+  push:
+    branches: [development, main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: 
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set deployment info
+        id: set_deployment_info
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" || ("${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.merged }}" == "true") ]]; then
+            echo "STAGE=prod" >> $GITHUB_OUTPUT
+            echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
+          else
+            echo "STAGE=dev" >> $GITHUB_OUTPUT
+            echo "CONTAINER_NAME=container-app-bot" >> $GITHUB_OUTPUT
+          fi
+
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "RELEASE_TAG=merged-into-main" >> $GITHUB_OUTPUT
+          else
+            echo "Unsupported event type"
+            exit 1
+          fi
+
+          echo "IMAGE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+
+      - name: Print deployment info
+        run: |
+          echo "Deployment Information:"
+          echo "Event: ${{ github.event_name }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Stage: ${{ steps.set_deployment_info.outputs.STAGE }}"
+          echo "Container Name: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+          echo "Release Tag: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
+          echo "Image Tag: ${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure CLI extension for Container Apps
+        run: az extension add --name containerapp --upgrade
+
+      - name: Build and push image to ACR
+        run: |
+          az acr build --registry ca20a502fbd8acr \
+            --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+            --file Dockerfile .
+      
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --name container-app-bot \
+            --resource-group container-app-rsgp \
+            --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+            --image ca20a502fbd8acr.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+            --set-env-vars RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} STAGE=${{ steps.set_deployment_info.outputs.STAGE }} PYTHONUNBUFFERED=1
