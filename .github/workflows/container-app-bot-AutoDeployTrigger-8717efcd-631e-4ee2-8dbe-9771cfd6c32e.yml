@@ -1,18 +1,24 @@
+# Change this name if desired
 name: Multi-Environment Deployment
 
 on:
   push:
+    # Update these branch names if yours are different
     branches: [develop, test, master, pre-prod, prod]
   pull_request:
     types: [closed]
+    # Update these branch names if yours are different
     branches: [develop, test, master, pre-prod, prod]
   release:
     types: [published]
   workflow_dispatch:
 
 env:
+  # Replace 'myacrname' with your Azure Container Registry name
   AZURE_CONTAINER_REGISTRY: ca20a502fbd8acr.azurecr.io
+  # Replace 'myResourceGroup' with your Resource Group name
   RESOURCE_GROUP: container-app-rsgp
+  # Replace 'my-telegram-bot' with your Container App name
   CONTAINER_APP_NAME: branched-container-app-bot
 
 jobs:
@@ -22,7 +28,9 @@ jobs:
     strategy:
       matrix:
         include:
+          # Update branch names if yours are different
           - branch: develop
+            # These environment names must match exactly what you created in GitHub
             environment: Development
             revision_suffix: dev
             release_prefix: alpha
@@ -74,7 +82,10 @@ jobs:
           --suffix ${{ matrix.revision_suffix }} \
           --min-replicas ${{ matrix.environment == 'Production' && 1 || 0 }} \
           --max-replicas ${{ matrix.environment == 'Production' && 10 || 1 }} \
-          --set-env-vars RELEASE_TAG=${{ env.RELEASE_TAG }} STAGE=${{ matrix.environment }} PYTHONUNBUFFERED=1
+          --set-env-vars RELEASE_TAG=${{ env.RELEASE_TAG }} STAGE=${{ matrix.environment }} PYTHONUNBUFFERED=1 \
+          BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
+          API_ID=${{ secrets.API_ID }} \
+          API_HASH=${{ secrets.API_HASH }}
 
     - name: Activate new revision
       run: |
