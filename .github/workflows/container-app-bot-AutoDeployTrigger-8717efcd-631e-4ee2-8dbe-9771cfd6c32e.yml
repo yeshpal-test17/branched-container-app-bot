@@ -62,6 +62,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+          
       - name: Install Azure CLI extension for Container Apps
         run: az extension add --name containerapp --upgrade
 
