@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_CONTAINER_REGISTRY: myacrname.azurecr.io
-  RESOURCE_GROUP: myResourceGroup
-  CONTAINER_APP_NAME: my-telegram-bot
+  AZURE_CONTAINER_REGISTRY: ca20a502fbd8acr.azurecr.io
+  RESOURCE_GROUP: container-app-rsgp
+  CONTAINER_APP_NAME: branched-container-app-bot
 
 jobs:
   build-and-deploy:
