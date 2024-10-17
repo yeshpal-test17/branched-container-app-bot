@@ -1,82 +1,90 @@
-name: Deploy Telegram Bot to Azure Container App
+name: Multi-Environment Deployment
 
 on:
-  release:
-    types: [prereleased, released]
-
   push:
-    branches: [development, main]
+    branches: [develop, test, master, pre-prod, prod]
   pull_request:
     types: [closed]
-    branches: [main]
+    branches: [develop, test, master, pre-prod, prod]
+  release:
+    types: [published]
   workflow_dispatch:
 
-permissions: 
-  contents: read
+env:
+  AZURE_CONTAINER_REGISTRY: myacrname.azurecr.io
+  RESOURCE_GROUP: myResourceGroup
+  CONTAINER_APP_NAME: my-telegram-bot
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - branch: develop
+            environment: Development
+            revision_suffix: dev
+            release_prefix: alpha
+          - branch: test
+            environment: Test
+            revision_suffix: test
+            release_prefix: beta
+          - branch: master
+            environment: Staging
+            revision_suffix: staging
+            release_prefix: rc
+          - branch: prod
+            environment: Production
+            revision_suffix: prod
+            release_prefix: release
+
+    environment: ${{ matrix.environment }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+    - uses: actions/checkout@v2
 
-      - name: Set deployment info
-        id: set_deployment_info
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" || ("${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.merged }}" == "true") ]]; then
-            echo "STAGE=prod" >> $GITHUB_OUTPUT
-            echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
-          else
-            echo "STAGE=dev" >> $GITHUB_OUTPUT
-            echo "CONTAINER_NAME=container-app-bot" >> $GITHUB_OUTPUT
-          fi
+    - name: Set up environment variables
+      run: |
+        echo "BRANCH=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+        if [[ "${{ github.event_name }}" == "release" ]]; then
+          echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+        else
+          echo "RELEASE_TAG=${{ matrix.release_prefix }}-$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
+        fi
+        echo "IMAGE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-          if [ "${{ github.event_name }}" == "release" ]; then
-            echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "RELEASE_TAG=merged-into-main" >> $GITHUB_OUTPUT
-          else
-            echo "Unsupported event type"
-            exit 1
-          fi
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-          echo "IMAGE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+    - name: Build and push image to ACR
+      run: |
+        az acr build --registry ${{ env.AZURE_CONTAINER_REGISTRY }} \
+          --image ${{ env.CONTAINER_APP_NAME }}:${{ env.IMAGE_TAG }} \
+          --file Dockerfile .
 
+    - name: Deploy to Azure Container App
+      run: |
+        az containerapp revision create \
+          --name ${{ env.CONTAINER_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --image ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_APP_NAME }}:${{ env.IMAGE_TAG }} \
+          --suffix ${{ matrix.revision_suffix }} \
+          --min-replicas ${{ matrix.environment == 'Production' && 1 || 0 }} \
+          --max-replicas ${{ matrix.environment == 'Production' && 10 || 1 }} \
+          --set-env-vars RELEASE_TAG=${{ env.RELEASE_TAG }} STAGE=${{ matrix.environment }} PYTHONUNBUFFERED=1
 
-      - name: Print deployment info
-        run: |
-          echo "Deployment Information:"
-          echo "Event: ${{ github.event_name }}"
-          echo "Branch: ${{ github.ref }}"
-          echo "Stage: ${{ steps.set_deployment_info.outputs.STAGE }}"
-          echo "Container Name: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-          echo "Release Tag: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
-          echo "Image Tag: ${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
+    - name: Activate new revision
+      run: |
+        az containerapp revision activate \
+          --name ${{ env.CONTAINER_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --revision ${{ env.CONTAINER_APP_NAME }}--${{ matrix.revision_suffix }}
 
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-          
-      - name: Install Azure CLI extension for Container Apps
-        run: az extension add --name containerapp --upgrade
-
-      - name: Build and push image to ACR
-        run: |
-          az acr build --registry ca20a502fbd8acr \
-            --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-            --file Dockerfile .
-      
-      - name: Update Azure Container App
-        run: |
-          az containerapp update \
-            --name container-app-bot \
-            --resource-group container-app-rsgp \
-            --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-            --image ca20a502fbd8acr.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-            --set-env-vars RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} STAGE=${{ steps.set_deployment_info.outputs.STAGE }} PYTHONUNBUFFERED=1
+    - name: Deactivate old revisions (non-prod only)
+      if: ${{ matrix.environment != 'Production' }}
+      run: |
+        CURRENT_REVISION=$(az containerapp revision list --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query "[?properties.active==\`true\` && contains(name, '${{ matrix.revision_suffix }}')].name" -o tsv)
+        az containerapp revision deactivate --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --revision $CURRENT_REVISION
