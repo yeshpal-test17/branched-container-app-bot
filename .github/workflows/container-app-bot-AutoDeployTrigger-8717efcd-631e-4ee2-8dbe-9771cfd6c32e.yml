@@ -41,11 +41,11 @@ jobs:
 
     environment: ${{ matrix.environment }}
     
-    # This condition ensures the job only runs for the specific branch being pushed
+    # Simplified condition that checks the current branch against matrix branch
     if: |
-      (github.event_name == 'push' && github.ref == format('refs/heads/{0}', matrix.branch)) ||
+      (github.event_name == 'push' && endsWith(github.ref, matrix.branch)) ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == matrix.branch) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', matrix.branch)) ||
+      (github.event_name == 'workflow_dispatch' && endsWith(github.ref, matrix.branch)) ||
       (github.event_name == 'release' && matrix.branch == 'prod')
 
     steps:
