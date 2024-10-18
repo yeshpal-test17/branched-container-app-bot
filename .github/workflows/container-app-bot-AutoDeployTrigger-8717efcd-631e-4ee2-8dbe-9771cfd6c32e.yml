@@ -16,9 +16,26 @@ env:
   CONTAINER_APP_NAME: branched-container-app-bot
 
 jobs:
-  build-and-deploy:
+  # First determine which environment to deploy to
+  determine-environment:
     runs-on: ubuntu-latest
-    
+    outputs:
+      branch: ${{ steps.set-branch.outputs.branch }}
+    steps:
+      - id: set-branch
+        run: |
+          if [[ $GITHUB_REF == refs/heads/* ]]; then
+            echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+          elif [[ $GITHUB_EVENT_NAME == "pull_request" ]]; then
+            echo "branch=${{ github.event.pull_request.base.ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=develop" >> $GITHUB_OUTPUT
+          fi
+
+  # Main deployment job
+  deploy-to-environment:
+    needs: determine-environment
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -41,12 +58,8 @@ jobs:
 
     environment: ${{ matrix.environment }}
     
-    # Simplified condition that checks the current branch against matrix branch
-    if: |
-      (github.event_name == 'push' && endsWith(github.ref, matrix.branch)) ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == matrix.branch) ||
-      (github.event_name == 'workflow_dispatch' && endsWith(github.ref, matrix.branch)) ||
-      (github.event_name == 'release' && matrix.branch == 'prod')
+    # Only run this job if the branch matches
+    if: matrix.branch == needs.determine-environment.outputs.branch
 
     steps:
     - uses: actions/checkout@v2
