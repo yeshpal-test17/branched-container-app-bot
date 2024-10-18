@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ACR_NAME: ca20a502fbd8acr  # Replace with your actual ACR name
+  ACR_NAME: ca20a502fbd8acr.azurecr.io  # Replace with your actual ACR name
   RESOURCE_GROUP: container-app-rsgp
   CONTAINER_APP_NAME: branched-container-app-bot
 
