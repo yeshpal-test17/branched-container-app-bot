@@ -1,24 +1,18 @@
-# Change this name if desired
 name: Multi-Environment Deployment
 
 on:
   push:
-    # Update these branch names if yours are different
-    branches: [develop, test, master, pre-prod, prod]
+    branches: [develop, test, master, prod]
   pull_request:
     types: [closed]
-    # Update these branch names if yours are different
-    branches: [develop, test, master, pre-prod, prod]
+    branches: [develop, test, master, prod]
   release:
     types: [published]
   workflow_dispatch:
 
 env:
-  # Replace 'myacrname' with your Azure Container Registry name
   AZURE_CONTAINER_REGISTRY: ca20a502fbd8acr.azurecr.io
-  # Replace 'myResourceGroup' with your Resource Group name
   RESOURCE_GROUP: container-app-rsgp
-  # Replace 'my-telegram-bot' with your Container App name
   CONTAINER_APP_NAME: branched-container-app-bot
 
 jobs:
@@ -28,9 +22,7 @@ jobs:
     strategy:
       matrix:
         include:
-          # Update branch names if yours are different
           - branch: develop
-            # These environment names must match exactly what you created in GitHub
             environment: Development
             revision_suffix: dev
             release_prefix: alpha
@@ -48,6 +40,13 @@ jobs:
             release_prefix: release
 
     environment: ${{ matrix.environment }}
+    
+    # This condition ensures the job only runs for the specific branch being pushed
+    if: |
+      (github.event_name == 'push' && github.ref == format('refs/heads/{0}', matrix.branch)) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == matrix.branch) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', matrix.branch)) ||
+      (github.event_name == 'release' && matrix.branch == 'prod')
 
     steps:
     - uses: actions/checkout@v2
@@ -82,10 +81,13 @@ jobs:
           --suffix ${{ matrix.revision_suffix }} \
           --min-replicas ${{ matrix.environment == 'Production' && 1 || 0 }} \
           --max-replicas ${{ matrix.environment == 'Production' && 10 || 1 }} \
-          --set-env-vars RELEASE_TAG=${{ env.RELEASE_TAG }} STAGE=${{ matrix.environment }} PYTHONUNBUFFERED=1 \
-          BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
-          API_ID=${{ secrets.API_ID }} \
-          API_HASH=${{ secrets.API_HASH }}
+          --set-env-vars \
+            RELEASE_TAG=${{ env.RELEASE_TAG }} \
+            STAGE=${{ matrix.environment }} \
+            PYTHONUNBUFFERED=1 \
+            BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
+            API_ID=${{ secrets.API_ID }} \
+            API_HASH=${{ secrets.API_HASH }}
 
     - name: Activate new revision
       run: |
@@ -97,5 +99,13 @@ jobs:
     - name: Deactivate old revisions (non-prod only)
       if: ${{ matrix.environment != 'Production' }}
       run: |
-        CURRENT_REVISION=$(az containerapp revision list --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query "[?properties.active==\`true\` && contains(name, '${{ matrix.revision_suffix }}')].name" -o tsv)
-        az containerapp revision deactivate --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --revision $CURRENT_REVISION
+        CURRENT_REVISION=$(az containerapp revision list \
+          --name ${{ env.CONTAINER_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --query "[?properties.active==\`true\` && contains(name, '${{ matrix.revision_suffix }}')].name" -o tsv)
+        if [ ! -z "$CURRENT_REVISION" ]; then
+          az containerapp revision deactivate \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --revision $CURRENT_REVISION
+        fi
