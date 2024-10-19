@@ -97,5 +97,4 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
             --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-            --set-env-vars RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} STAGE=${{ steps.set_deployment_info.outputs.STAGE }} PYTHONUNBUFFERED=1 \
-            --set-secrets BOT_TOKEN=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}
+            --set-env-vars RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} STAGE=${{ steps.set_deployment_info.outputs.STAGE }} PYTHONUNBUFFERED=1 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}
