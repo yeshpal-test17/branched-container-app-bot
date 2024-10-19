@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  ACR_NAME: ca20a502fbd8acr  # Replace with your actual ACR name
+  ACR_NAME: ca20a502fbd8acr
   RESOURCE_GROUP: container-app-rsgp
   CONTAINER_APP_NAME: branched-container-app-bot
 
@@ -26,25 +26,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Set deployment info
         id: set_deployment_info
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/prod" ]]; then
             echo "STAGE=prod" >> $GITHUB_OUTPUT
             echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
+            echo "BOT_TOKEN_SECRET=bottoken" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             echo "STAGE=staging" >> $GITHUB_OUTPUT
             echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
+            echo "BOT_TOKEN_SECRET=bottoken" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/test" ]]; then
             echo "STAGE=test" >> $GITHUB_OUTPUT
             echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
+            echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
           else
             echo "STAGE=dev" >> $GITHUB_OUTPUT
             echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
+            echo "BOT_TOKEN_SECRET=bottoken" >> $GITHUB_OUTPUT
           fi
 
           if [ "${{ github.event_name }}" == "release" ]; then
-            echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            if [[ "${{ github.ref }}" == "refs/heads/test" ]]; then
+              echo "RELEASE_TAG=beta-${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+              echo "RELEASE_TAG=alpha-${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            else
+              echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            fi
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -64,14 +79,7 @@ jobs:
           echo "Container Name: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
           echo "Release Tag: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
           echo "Image Tag: ${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
-
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: List ACRs
-        run: az acr list --output table
+          echo "Bot Token Secret: ${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
 
       - name: Install Azure CLI extension for Container Apps
         run: az extension add --name containerapp --upgrade
@@ -89,4 +97,5 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
             --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-            --set-env-vars RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} STAGE=${{ steps.set_deployment_info.outputs.STAGE }} PYTHONUNBUFFERED=1
+            --set-env-vars RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} STAGE=${{ steps.set_deployment_info.outputs.STAGE }} PYTHONUNBUFFERED=1 \
+            --set-secrets BOT_TOKEN=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}
