@@ -36,7 +36,8 @@ jobs:
 
       # Add validation step for protected branches
       - name: Validate deployment conditions
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/prod'
+        
+        if: github.ref == 'refs/heads/prod'
         run: |
           # Check if the deployment is happening during business hours (example)
           HOUR=$(date +%H)
@@ -162,7 +163,7 @@ jobs:
           echo "Deployment verification failed"
           exit 1
 
-          
+
       - name: Final Variables Summary
         run: |
           echo "=== FINAL WORKFLOW VARIABLES SUMMARY ==="
