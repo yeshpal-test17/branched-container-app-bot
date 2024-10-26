@@ -64,22 +64,22 @@ jobs:
             if [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
               echo "STAGE=test" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=test_bot_token" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
               echo "DEPLOYMENT_SLOT=test" >> $GITHUB_OUTPUT
             elif [[ "$BRANCH_REF" == "refs/heads/master" ]]; then
               echo "STAGE=staging" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=staging_bot_token" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=staging-bot-token" >> $GITHUB_OUTPUT
               echo "DEPLOYMENT_SLOT=staging" >> $GITHUB_OUTPUT
             elif [[ "$BRANCH_REF" == "refs/heads/prod" ]]; then
               echo "STAGE=prod" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=prod_bot_token" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
               echo "DEPLOYMENT_SLOT=production" >> $GITHUB_OUTPUT
             else
               echo "STAGE=dev" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=dev_bot_token" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
               echo "DEPLOYMENT_SLOT=development" >> $GITHUB_OUTPUT
             fi
   
