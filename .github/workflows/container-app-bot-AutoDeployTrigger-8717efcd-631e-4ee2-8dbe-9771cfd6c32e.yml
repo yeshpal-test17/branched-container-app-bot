@@ -21,9 +21,6 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    
-    # Add environment protection for master and prod
-    environment: ${{ github.ref == 'refs/heads/prod' && 'production' || github.ref == 'refs/heads/master' && 'staging' || 'development' }}
 
     steps:
       - name: Checkout repository
@@ -33,19 +30,6 @@ jobs:
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      # Add validation step for protected branches
-      - name: Validate deployment conditions
-        
-        if: github.ref == 'refs/heads/prod'
-        run: |
-          # Check if the deployment is happening during business hours (example)
-          HOUR=$(date +%H)
-          DAY=$(date +%u)
-          if [[ $DAY -gt 5 ]] || [[ $HOUR -lt 9 ]] || [[ $HOUR -gt 17 ]]; then
-            echo "Deployments to master/prod are only allowed during business hours (Mon-Fri, 9 AM - 5 PM)"
-            [[ ${{ github.event_name }} == 'workflow_dispatch' ]] || exit 1
-          fi
 
       - name: Set deployment info
         id: set_deployment_info
@@ -66,28 +50,30 @@ jobs:
               echo "STAGE=test" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
               echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
-              echo "DEPLOYMENT_SLOT=test" >> $GITHUB_OUTPUT
             elif [[ "$BRANCH_REF" == "refs/heads/master" ]]; then
               echo "STAGE=staging" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=staging-bot-token" >> $GITHUB_OUTPUT
-              echo "DEPLOYMENT_SLOT=staging" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
+            elif [[ "$BRANCH_REF" == "refs/heads/pre-prod" ]]; then
+              echo "STAGE=pre-prod" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-preprod" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=preprod-bot-token" >> $GITHUB_OUTPUT
             elif [[ "$BRANCH_REF" == "refs/heads/prod" ]]; then
               echo "STAGE=prod" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
               echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
-              echo "DEPLOYMENT_SLOT=production" >> $GITHUB_OUTPUT
             else
               echo "STAGE=dev" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
               echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
-              echo "DEPLOYMENT_SLOT=development" >> $GITHUB_OUTPUT
             fi
   
             # Set release tag based on event type and branch
             if [ "${{ github.event_name }}" == "release" ]; then
               if [[ "$BRANCH_REF" == "refs/heads/master" ]]; then
                 echo "RELEASE_TAG=staging-${TAG_NAME}" >> $GITHUB_OUTPUT
+              elif [[ "$BRANCH_REF" == "refs/heads/pre-prod" ]]; then
+                echo "RELEASE_TAG=preprod-${TAG_NAME}" >> $GITHUB_OUTPUT
               elif [[ "$BRANCH_REF" == "refs/heads/prod" ]]; then
                 echo "RELEASE_TAG=release-${TAG_NAME}" >> $GITHUB_OUTPUT
               elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
@@ -105,25 +91,12 @@ jobs:
   
             echo "IMAGE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-
       - name: Build and push image to ACR
         run: |
           az acr build --registry ${{ env.ACR_NAME }} \
             --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
             --file Dockerfile .
       
-      # Add deployment verification for master/prod
-      - name: Pre-deployment verification
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/prod'
-        run: |
-          echo "Performing pre-deployment verification checks..."
-          # Add your verification logic here
-          # Example: Check if required secrets exist
-          if [[ -z "${{ secrets.AZURE_CREDENTIALS }}" ]]; then
-            echo "Missing required credentials"
-            exit 1
-          fi
-
       - name: Update Azure Container App
         run: |
           az containerapp update \
@@ -136,25 +109,6 @@ jobs:
               STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
               PYTHONUNBUFFERED=1 \
               BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}
-
-      # Add post-deployment verification
-      - name: Verify deployment
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/prod'
-        run: |
-          echo "Verifying deployment..."
-          # Add deployment verification logic
-          # Example: Check if the container app is healthy
-          HEALTH_CHECK_URL="https://${{ env.CONTAINER_APP_NAME }}.azurecontainerapps.io/health"
-          for i in {1..5}; do
-            if curl -s -f $HEALTH_CHECK_URL; then
-              echo "Deployment verified successfully"
-              exit 0
-            fi
-            sleep 30
-          done
-          echo "Deployment verification failed"
-          exit 1
-
 
       - name: Final Variables Summary
         run: |
@@ -169,7 +123,7 @@ jobs:
           echo "  Container Name: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
           echo "  Release Tag: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
           echo "  Image Tag: ${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
-          echo "  Deployment Slot: ${{ steps.set_deployment_info.outputs.DEPLOYMENT_SLOT }}"
+          echo "  Bot Token Secret: ${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
           echo ""
           echo "Container Image:"
           echo "  Full Image Path: ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
