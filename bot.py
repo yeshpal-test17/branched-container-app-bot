@@ -46,8 +46,8 @@ def start_command(client, message):
     
     response_message = f"Hello and Welcome to my bot! 🤖\n\n"
     response_message += f"Environment: {STAGE}\n"
-    response_message += f"Port: {PORT}\n"
-    response_message += f"Release: {RELEASE_TAG}"
+    response_message += f"Release: {RELEASE_TAG}\n"
+    response_message += f"Port: {PORT}"
     
     logger.info(f'Sending response: {response_message}')
     bot.send_message(user_id, response_message)
@@ -64,5 +64,5 @@ if __name__ == "__main__":
     # Run the Telegram bot
     logger.info("Starting Telegram bot")
     bot.start()
-    logger.info("Bot started successfully")
+    logger.info(f"Bot started successfully. Version: {RELEASE_TAG}")
     idle()
