@@ -69,6 +69,7 @@ jobs:
             fi
   
             
+
             # Set release tag based on event type and branch
             if [ "${{ github.event_name }}" == "release" ]; then
               if [[ "$BRANCH_REF" == "refs/heads/master" ]]; then
