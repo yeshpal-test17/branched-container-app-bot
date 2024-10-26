@@ -104,7 +104,7 @@ jobs:
           az containerapp create \
             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             --resource-group container-app-rsgp \
-            --environment container-app-managed-env \
+            --environment container-app-bot-env \
             --registry-server ca20a502fbd8acr.azurecr.io \
             --image ca20a502fbd8acr.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
             --target-port 800 \
