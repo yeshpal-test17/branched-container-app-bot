@@ -65,15 +65,9 @@ jobs:
               echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
               echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
               ;;
-            "refs/heads/pre-prod")
-              echo "STAGE=pre-prod" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-preprod" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=preprod-bot-token" >> $GITHUB_OUTPUT
-              echo "IMAGE_TAG=preprod-latest" >> $GITHUB_OUTPUT
-              ;;
             "refs/heads/prod")
               echo "STAGE=prod" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
               echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
               echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
               ;;
