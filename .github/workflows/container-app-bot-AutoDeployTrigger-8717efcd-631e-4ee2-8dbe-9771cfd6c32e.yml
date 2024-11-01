@@ -34,67 +34,81 @@ jobs:
       - name: Set deployment info
         id: set_deployment_info
         run: |
-            # For releases, use the target branch instead of the tag ref
-            if [ "${{ github.event_name }}" == "release" ]; then
-              BRANCH_REF="refs/heads/${{ github.event.release.target_commitish }}"
-              TAG_NAME="${{ github.event.release.tag_name }}"
-              # Remove any prefix if it exists
-              TAG_NAME="${TAG_NAME#beta-}"
-              TAG_NAME="${TAG_NAME#alpha-}"
-            else
-              BRANCH_REF="${{ github.ref }}"
-            fi
-  
-            # Set stage and container name based on branch
-            if [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
-              echo "STAGE=test" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
-            elif [[ "$BRANCH_REF" == "refs/heads/master" ]]; then
-              echo "STAGE=staging" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
-            elif [[ "$BRANCH_REF" == "refs/heads/pre-prod" ]]; then
-              echo "STAGE=pre-prod" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-preprod" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=preprod-bot-token" >> $GITHUB_OUTPUT
-            elif [[ "$BRANCH_REF" == "refs/heads/prod" ]]; then
-              echo "STAGE=prod" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
-            else
+          # For releases, use the target branch instead of the tag ref
+          if [ "${{ github.event_name }}" == "release" ]; then
+            BRANCH_REF="refs/heads/${{ github.event.release.target_commitish }}"
+            TAG_NAME="${{ github.event.release.tag_name }}"
+            # Remove any prefix if it exists
+            TAG_NAME="${TAG_NAME#beta-}"
+            TAG_NAME="${TAG_NAME#alpha-}"
+          else
+            BRANCH_REF="${{ github.ref }}"
+          fi
+
+          # Set environment variables based on branch
+          case "$BRANCH_REF" in
+            "refs/heads/develop")
               echo "STAGE=dev" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
               echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
-            fi
-  
-            
+              echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/test")
+              echo "STAGE=test" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=test-latest" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/master")
+              echo "STAGE=staging" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/pre-prod")
+              echo "STAGE=pre-prod" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-preprod" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=preprod-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=preprod-latest" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/prod")
+              echo "STAGE=prod" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-live" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "STAGE=dev" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
+              ;;
+          esac
 
-            # Set release tag based on event type and branch
-            if [ "${{ github.event_name }}" == "release" ]; then
-              if [[ "$BRANCH_REF" == "refs/heads/master" ]]; then
-                echo "RELEASE_TAG=staging-${TAG_NAME}" >> $GITHUB_OUTPUT
-              elif [[ "$BRANCH_REF" == "refs/heads/pre-prod" ]]; then
-                echo "RELEASE_TAG=preprod-${TAG_NAME}" >> $GITHUB_OUTPUT
-              elif [[ "$BRANCH_REF" == "refs/heads/prod" ]]; then
-                echo "RELEASE_TAG=release-${TAG_NAME}" >> $GITHUB_OUTPUT
-              elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
-                echo "RELEASE_TAG=beta-${TAG_NAME}" >> $GITHUB_OUTPUT
-              else
-                echo "RELEASE_TAG=alpha-${TAG_NAME}" >> $GITHUB_OUTPUT
-              fi
-            elif [ "${{ github.event_name }}" == "push" ]; then
-              echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            elif [ "${{ github.event_name }}" == "pull_request" ]; then
-              echo "RELEASE_TAG=merged-into-${{ github.base.ref }}" >> $GITHUB_OUTPUT
-            else
-              echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
+          # Set release tag for informational purposes
+          if [ "${{ github.event_name }}" == "release" ]; then
+            if [[ "$BRANCH_REF" == "refs/heads/develop" ]]; then
+              echo "RELEASE_TAG=alpha-${TAG_NAME}" >> $GITHUB_OUTPUT
+            elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
+              echo "RELEASE_TAG=beta-${TAG_NAME}" >> $GITHUB_OUTPUT
             fi
-  
-            echo "IMAGE_TAG=$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "RELEASE_TAG=merged-into-${{ github.base.ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build and push image to ACR
         run: |
+          # Clean up old images with the same tag if they exist
+          az acr repository delete \
+            --name ${{ env.ACR_NAME }} \
+            --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+            --yes || true
+
+          # Build and push new image
           az acr build --registry ${{ env.ACR_NAME }} \
             --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
             --file Dockerfile .
