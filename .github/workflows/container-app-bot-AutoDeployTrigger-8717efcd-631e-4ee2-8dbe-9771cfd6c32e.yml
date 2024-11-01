@@ -4,7 +4,7 @@ on:
   release:
     types: [prereleased, released]
   push:
-    branches: [develop, test, master, pre-prod, prod]
+    branches: [master, prod]
   pull_request:
     types: [closed]
     branches: [master, prod]
