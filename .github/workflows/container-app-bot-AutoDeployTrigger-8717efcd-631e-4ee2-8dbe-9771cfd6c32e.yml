@@ -117,44 +117,18 @@ jobs:
       
       - name: Update Azure Container App
         run: |
-                  # List all existing containers
-                  echo "Listing existing containers..."
-                  CONTAINERS=$(az containerapp show \
-                    --name ${{ env.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --query "properties.template.containers[].name" -o tsv)
-                  
-                  echo "Found containers: $CONTAINERS"
-                  
-                  # Remove dev-branched-container-app-bot if it exists
-                  if echo "$CONTAINERS" | grep -q "dev-branched-container-app-bot"; then
-                    echo "Removing dev-branched-container-app-bot..."
-                    az containerapp revision list \
-                      --name ${{ env.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --query "[?contains(containers[].name, 'dev-branched-container-app-bot')].name" -o tsv | \
-                    while read -r revision; do
-                      echo "Deactivating revision $revision..."
-                      az containerapp revision deactivate \
-                        --name ${{ env.CONTAINER_APP_NAME }} \
-                        --resource-group ${{ env.RESOURCE_GROUP }} \
-                        --revision $revision
-                    done
-                  fi
-        
-                  # Then update with the new container configuration
-                  az containerapp update \
-                    --name ${{ env.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                    --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                    --set-env-vars \
-                      RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                      STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                      PYTHONUNBUFFERED=1 \
-                      BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                      API_ID=secretref:api-id \
-                      API_HASH=secretref:api-hash
+              az containerapp update \
+                --name ${{ env.CONTAINER_APP_NAME }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                --set-env-vars \
+                  RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                  STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                  PYTHONUNBUFFERED=1 \
+                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                  API_ID=secretref:api-id \
+                  API_HASH=secretref:api-hash
 
 
       - name: Final Variables Summary
