@@ -4,11 +4,10 @@ on:
   release:
     types: [prereleased, released]
   push:
-    branches: [master, pre-prod, prod, develop, test]
+    branches: [master, prod]
   pull_request:
     types: [closed]
-    branches: [master, pre-prod, prod, develop, test]
-  workflow_dispatch:
+    branches: [master, prod
 
 permissions: 
   contents: read
