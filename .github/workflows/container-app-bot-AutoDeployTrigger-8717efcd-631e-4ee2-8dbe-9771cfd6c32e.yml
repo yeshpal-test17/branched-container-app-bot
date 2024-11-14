@@ -133,42 +133,55 @@ jobs:
               
               echo "Active revisions: $ACTIVE_REVISIONS"
               
-              # Set scale parameters based on whether this is prod or dev
               if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+                echo "Managing PROD revision..."
                 MIN_REPLICAS="1"
                 MAX_REPLICAS="10"
                 REVISION_SUFFIX="${{ env.PROD_REVISION_SUFFIX }}"
                 
-                # Deactivate any non-prod revisions that might be running prod image
-                for revision in $ACTIVE_REVISIONS; do
-                  if [[ "$revision" != *"$REVISION_SUFFIX"* ]]; then
-                    echo "Deactivating non-prod revision: $revision"
+                # Get all prod revisions ordered by creation time
+                PROD_REVISIONS=$(az containerapp revision list \
+                  -n ${{ env.CONTAINER_APP_NAME }} \
+                  -g ${{ env.RESOURCE_GROUP }} \
+                  --query "[?ends_with(name, '${{ env.PROD_REVISION_SUFFIX }}')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o tsv)
+                
+                # Keep count of prod revisions
+                PROD_REVISION_COUNT=$(echo "$PROD_REVISIONS" | wc -l)
+                
+                # If we have more than 3 prod revisions, deactivate the oldest ones
+                if [ "$PROD_REVISION_COUNT" -gt 3 ]; then
+                  echo "More than 3 prod revisions found. Deactivating older revisions..."
+                  REVISIONS_TO_REMOVE=$((PROD_REVISION_COUNT - 3))
+                  echo "$PROD_REVISIONS" | head -n "$REVISIONS_TO_REMOVE" | while read -r revision; do
+                    echo "Deactivating old prod revision: $revision"
                     az containerapp revision deactivate \
                       --name ${{ env.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision $revision
-                  fi
-                done
+                      --revision "$revision"
+                  done
+                fi
+                
               else
+                echo "Managing DEV revision..."
                 MIN_REPLICAS="0"
                 MAX_REPLICAS="5"
                 REVISION_SUFFIX="${{ env.DEV_REVISION_SUFFIX }}"
                 
-                # Find and deactivate old dev revisions
+                # For dev environments, deactivate any existing dev revisions
                 for revision in $ACTIVE_REVISIONS; do
                   if [[ "$revision" == *"$REVISION_SUFFIX"* ]]; then
-                    echo "Deactivating old dev revision: $revision"
+                    echo "Deactivating existing dev revision: $revision"
                     az containerapp revision deactivate \
                       --name ${{ env.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision $revision
+                      --revision "$revision"
                   fi
                 done
               fi
               
               echo "Deploying new revision with suffix: $REVISION_SUFFIX"
               
-              # Deploy new revision using revision-suffix instead of revision-name
+              # Deploy new revision
               az containerapp update \
                 --name ${{ env.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -184,28 +197,37 @@ jobs:
                   BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                   API_ID=secretref:api-id \
                   API_HASH=secretref:api-hash
-    
+          
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
               
-              # Wait for a short period to allow deployment to stabilize
-              sleep 30
+              # Increase wait time to ensure deployment is complete
+              echo "Waiting for deployment to stabilize..."
+              sleep 60
               
               # Get current active revisions
               ACTIVE_REVISIONS=$(az containerapp revision list \
                 -n ${{ env.CONTAINER_APP_NAME }} \
                 -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].{name:name, replicas:properties.replicas}" -o json)
+                --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
               
               echo "Current active revisions:"
               echo "$ACTIVE_REVISIONS" | jq '.'
               
-              # Verify our revision exists and is active
+              # Get expected suffix and container name
               EXPECTED_SUFFIX="${{ steps.set_deployment_info.outputs.REVISION_SUFFIX }}"
-              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$EXPECTED_SUFFIX\"))" > /dev/null; then
-                echo "✅ Deployment successful - Found active revision with suffix: $EXPECTED_SUFFIX"
+              EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+              echo "Looking for revision with suffix: $EXPECTED_SUFFIX and container: $EXPECTED_CONTAINER"
+              
+              # Detailed verification
+              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | endswith(\"$EXPECTED_SUFFIX\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
+                echo "✅ Deployment successful - Found active revision with correct suffix and container"
+                echo "Active revision details:"
+                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | endswith(\"$EXPECTED_SUFFIX\")) | select(.container == \"$EXPECTED_CONTAINER\")"
               else
-                echo "❌ Deployment verification failed - No active revision found with suffix: $EXPECTED_SUFFIX"
+                echo "❌ Deployment verification failed - No matching active revision found"
+                echo "All active revisions:"
+                echo "$ACTIVE_REVISIONS" | jq '.'
                 exit 1
               fi
