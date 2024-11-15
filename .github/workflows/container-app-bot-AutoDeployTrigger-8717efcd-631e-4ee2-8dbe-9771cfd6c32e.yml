@@ -126,40 +126,47 @@ jobs:
             
       - name: Manage Container App Revisions
         run: |
-              # Get current timestamp for unique suffix
-              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              echo "Getting current revision information..."
               
-              # Get all active revisions
-              ACTIVE_REVISIONS=$(az containerapp revision list \
+              # Get all revisions ordered by creation time
+              ALL_REVISIONS=$(az containerapp revision list \
                 -n ${{ env.CONTAINER_APP_NAME }} \
                 -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].name" -o tsv)
+                --query "[].{name:name, active:properties.active, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json)
               
-              echo "Active revisions: $ACTIVE_REVISIONS"
+              echo "Current revisions:"
+              echo "$ALL_REVISIONS" | jq '.'
               
               if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                 echo "Managing PROD revision..."
                 MIN_REPLICAS="1"
                 MAX_REPLICAS="10"
-                # Create unique suffix for prod
+                
+                # Get current timestamp for new revision
+                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
                 REVISION_SUFFIX="prod-${TIMESTAMP}"
                 
-                # Get all prod revisions ordered by creation time
-                PROD_REVISIONS=$(az containerapp revision list \
-                  -n ${{ env.CONTAINER_APP_NAME }} \
-                  -g ${{ env.RESOURCE_GROUP }} \
-                  --query "[?contains(name, 'prod-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o tsv)
+                # Get all prod revisions
+                PROD_REVISIONS=$(echo "$ALL_REVISIONS" | \
+                  jq -r '.[] | select(.name | contains("prod-")) | .name')
                 
-                echo "Existing prod revisions:"
-                echo "$PROD_REVISIONS"
+                # Find and deactivate currently active prod revision
+                ACTIVE_PROD_REVISION=$(echo "$ALL_REVISIONS" | \
+                  jq -r '.[] | select(.name | contains("prod-")) | select(.active == true) | .name')
                 
-                # Keep count of prod revisions
+                if [ -n "$ACTIVE_PROD_REVISION" ]; then
+                  echo "Deactivating current active prod revision: $ACTIVE_PROD_REVISION"
+                  az containerapp revision deactivate \
+                    --name ${{ env.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --revision "$ACTIVE_PROD_REVISION"
+                fi
+                
+                # Keep only last 3 prod revisions
                 PROD_REVISION_COUNT=$(echo "$PROD_REVISIONS" | wc -l)
-                
-                # If we have more than 3 prod revisions, deactivate the oldest ones
                 if [ "$PROD_REVISION_COUNT" -gt 3 ]; then
-                  echo "More than 3 prod revisions found. Deactivating older revisions..."
                   REVISIONS_TO_REMOVE=$((PROD_REVISION_COUNT - 3))
+                  echo "Removing $REVISIONS_TO_REMOVE oldest prod revision(s)"
                   echo "$PROD_REVISIONS" | head -n "$REVISIONS_TO_REMOVE" | while read -r revision; do
                     echo "Deactivating old prod revision: $revision"
                     az containerapp revision deactivate \
@@ -173,19 +180,45 @@ jobs:
                 echo "Managing DEV revision..."
                 MIN_REPLICAS="0"
                 MAX_REPLICAS="5"
-                # Create unique suffix for dev
+                
+                # Get current timestamp for new revision
+                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
                 REVISION_SUFFIX="dev-${TIMESTAMP}"
                 
-                # For dev environments, deactivate any existing dev revisions
-                for revision in $ACTIVE_REVISIONS; do
-                  if [[ "$revision" == *"dev-"* ]]; then
-                    echo "Deactivating existing dev revision: $revision"
+                # Get all dev revisions
+                DEV_REVISIONS=$(echo "$ALL_REVISIONS" | \
+                  jq -r '.[] | select(.name | contains("dev-")) | .name')
+                
+                # Find and deactivate any active dev revision
+                ACTIVE_DEV_REVISION=$(echo "$ALL_REVISIONS" | \
+                  jq -r '.[] | select(.name | contains("dev-")) | select(.active == true) | .name')
+                
+                if [ -n "$ACTIVE_DEV_REVISION" ]; then
+                  echo "Deactivating current active dev revision: $ACTIVE_DEV_REVISION"
+                  az containerapp revision deactivate \
+                    --name ${{ env.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --revision "$ACTIVE_DEV_REVISION"
+                fi
+                
+                # Keep only last 2 dev revisions
+                DEV_REVISION_COUNT=$(echo "$DEV_REVISIONS" | wc -l)
+                if [ "$DEV_REVISION_COUNT" -gt 2 ]; then
+                  REVISIONS_TO_REMOVE=$((DEV_REVISION_COUNT - 2))
+                  echo "Removing $REVISIONS_TO_REMOVE oldest dev revision(s)"
+                  echo "$DEV_REVISIONS" | head -n "$REVISIONS_TO_REMOVE" | while read -r revision; do
+                    echo "Removing old dev revision: $revision"
                     az containerapp revision deactivate \
                       --name ${{ env.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision"
-                  fi
-                done
+                      --revision "$revision" || true
+                    # After deactivation, we can delete the revision
+                    az containerapp revision delete \
+                      --name ${{ env.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$revision" --yes || true
+                  done
+                fi
               fi
               
               echo "Deploying new revision with suffix: $REVISION_SUFFIX"
@@ -206,7 +239,7 @@ jobs:
                   BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                   API_ID=secretref:api-id \
                   API_HASH=secretref:api-hash
-          
+
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
