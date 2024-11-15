@@ -205,8 +205,7 @@ jobs:
                   BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                   API_ID=secretref:api-id \
                   API_HASH=secretref:api-hash
-          
-                  
+
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
