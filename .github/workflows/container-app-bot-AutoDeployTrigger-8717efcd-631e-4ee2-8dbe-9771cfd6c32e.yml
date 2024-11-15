@@ -125,6 +125,9 @@ jobs:
 
       - name: Manage Container App Revisions
         run: |
+              # Get current timestamp for unique suffix
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              
               # Get all active revisions
               ACTIVE_REVISIONS=$(az containerapp revision list \
                 -n ${{ env.CONTAINER_APP_NAME }} \
@@ -137,13 +140,17 @@ jobs:
                 echo "Managing PROD revision..."
                 MIN_REPLICAS="1"
                 MAX_REPLICAS="10"
-                REVISION_SUFFIX="${{ env.PROD_REVISION_SUFFIX }}"
+                # Create unique suffix for prod
+                REVISION_SUFFIX="prod-${TIMESTAMP}"
                 
                 # Get all prod revisions ordered by creation time
                 PROD_REVISIONS=$(az containerapp revision list \
                   -n ${{ env.CONTAINER_APP_NAME }} \
                   -g ${{ env.RESOURCE_GROUP }} \
-                  --query "[?ends_with(name, '${{ env.PROD_REVISION_SUFFIX }}')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o tsv)
+                  --query "[?contains(name, 'prod-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o tsv)
+                
+                echo "Existing prod revisions:"
+                echo "$PROD_REVISIONS"
                 
                 # Keep count of prod revisions
                 PROD_REVISION_COUNT=$(echo "$PROD_REVISIONS" | wc -l)
@@ -165,11 +172,12 @@ jobs:
                 echo "Managing DEV revision..."
                 MIN_REPLICAS="0"
                 MAX_REPLICAS="5"
-                REVISION_SUFFIX="${{ env.DEV_REVISION_SUFFIX }}"
+                # Create unique suffix for dev
+                REVISION_SUFFIX="dev-${TIMESTAMP}"
                 
                 # For dev environments, deactivate any existing dev revisions
                 for revision in $ACTIVE_REVISIONS; do
-                  if [[ "$revision" == *"$REVISION_SUFFIX"* ]]; then
+                  if [[ "$revision" == *"dev-"* ]]; then
                     echo "Deactivating existing dev revision: $revision"
                     az containerapp revision deactivate \
                       --name ${{ env.CONTAINER_APP_NAME }} \
@@ -198,7 +206,6 @@ jobs:
                   API_ID=secretref:api-id \
                   API_HASH=secretref:api-hash
           
-                  
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
@@ -216,16 +223,23 @@ jobs:
               echo "Current active revisions:"
               echo "$ACTIVE_REVISIONS" | jq '.'
               
-              # Get expected suffix and container name
-              EXPECTED_SUFFIX="${{ steps.set_deployment_info.outputs.REVISION_SUFFIX }}"
-              EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-              echo "Looking for revision with suffix: $EXPECTED_SUFFIX and container: $EXPECTED_CONTAINER"
+              # Get timestamp from earlier for verification
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              # Define expected suffix pattern based on deployment type
+              if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+                SUFFIX_PATTERN="prod-"
+              else
+                SUFFIX_PATTERN="dev-"
+              fi
               
-              # Detailed verification
-              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | endswith(\"$EXPECTED_SUFFIX\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
-                echo "✅ Deployment successful - Found active revision with correct suffix and container"
+              EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+              echo "Looking for revision with suffix pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
+              
+              # More detailed verification
+              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
+                echo "✅ Deployment successful - Found active revision with correct suffix pattern and container"
                 echo "Active revision details:"
-                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | endswith(\"$EXPECTED_SUFFIX\")) | select(.container == \"$EXPECTED_CONTAINER\")"
+                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
               else
                 echo "❌ Deployment verification failed - No matching active revision found"
                 echo "All active revisions:"
