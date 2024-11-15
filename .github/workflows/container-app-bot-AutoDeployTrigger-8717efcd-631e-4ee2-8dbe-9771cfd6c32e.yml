@@ -123,6 +123,7 @@ jobs:
             --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
             --file Dockerfile .
 
+
             
       - name: Manage Container App Revisions
         run: |
