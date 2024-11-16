@@ -133,113 +133,91 @@ jobs:
               ALL_REVISIONS=$(az containerapp revision list \
                 -n ${{ env.CONTAINER_APP_NAME }} \
                 -g ${{ env.RESOURCE_GROUP }} \
-                --query "[].{name:name, active:properties.active, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json)
+                --query "[].{name:name, active:properties.active, createdTime:properties.createdTime, containerName:properties.template.containers[0].name} | sort_by(@, &createdTime)" -o json)
               
               echo "Current revisions:"
               echo "$ALL_REVISIONS" | jq '.'
               
+              # Function to check if revision exists
+              check_revision_exists() {
+                local revision_type=$1
+                echo "$ALL_REVISIONS" | jq -r --arg type "$revision_type" '.[] | select(.name | contains($type)) | .name' | head -n 1
+              }
+              
+              # Get current timestamp for new revision
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              
               if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                 echo "Managing PROD revision..."
+                REVISION_SUFFIX="prod-${TIMESTAMP}"
                 MIN_REPLICAS="1"
                 MAX_REPLICAS="10"
                 
-                # Get current timestamp for new revision
-                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                REVISION_SUFFIX="prod-${TIMESTAMP}"
+                # Find current prod revision
+                CURRENT_PROD_REVISION=$(check_revision_exists "prod-")
                 
-                # Get all prod revisions
-                PROD_REVISIONS=$(echo "$ALL_REVISIONS" | \
-                  jq -r '.[] | select(.name | contains("prod-")) | .name')
-                
-                # Find and deactivate currently active prod revision
-                ACTIVE_PROD_REVISION=$(echo "$ALL_REVISIONS" | \
-                  jq -r '.[] | select(.name | contains("prod-")) | select(.active == true) | .name')
-                
-                if [ -n "$ACTIVE_PROD_REVISION" ]; then
-                  echo "Deactivating current active prod revision: $ACTIVE_PROD_REVISION"
+                if [ -n "$CURRENT_PROD_REVISION" ]; then
+                  echo "Deactivating current prod revision: $CURRENT_PROD_REVISION"
                   az containerapp revision deactivate \
                     --name ${{ env.CONTAINER_APP_NAME }} \
                     --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision "$ACTIVE_PROD_REVISION"
+                    --revision "$CURRENT_PROD_REVISION"
                 fi
                 
-                # Keep only last 3 prod revisions
-                PROD_REVISION_COUNT=$(echo "$PROD_REVISIONS" | wc -l)
-                if [ "$PROD_REVISION_COUNT" -gt 3 ]; then
-                  REVISIONS_TO_REMOVE=$((PROD_REVISION_COUNT - 3))
-                  echo "Removing $REVISIONS_TO_REMOVE oldest prod revision(s)"
-                  echo "$PROD_REVISIONS" | head -n "$REVISIONS_TO_REMOVE" | while read -r revision; do
-                    echo "Deactivating old prod revision: $revision"
-                    az containerapp revision deactivate \
-                      --name ${{ env.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision"
-                  done
-                fi
-                
+                # Deploy new prod revision
+                echo "Deploying new prod revision with suffix: $REVISION_SUFFIX"
+                az containerapp update \
+                  --name ${{ env.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ env.RESOURCE_GROUP }} \
+                  --container-name container-app-bot-prod \
+                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                  --revision-suffix $REVISION_SUFFIX \
+                  --min-replicas $MIN_REPLICAS \
+                  --max-replicas $MAX_REPLICAS \
+                  --set-env-vars \
+                    RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                    STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                    PYTHONUNBUFFERED=1 \
+                    BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                    API_ID=secretref:api-id \
+                    API_HASH=secretref:api-hash
+                    
               else
                 echo "Managing DEV revision..."
                 MIN_REPLICAS="0"
                 MAX_REPLICAS="5"
                 
-                # Get current timestamp for new revision
-                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                REVISION_SUFFIX="dev-${TIMESTAMP}"
+                # Check for existing dev revision
+                EXISTING_DEV_REVISION=$(check_revision_exists "dev-")
                 
-                # Get all dev revisions
-                DEV_REVISIONS=$(echo "$ALL_REVISIONS" | \
-                  jq -r '.[] | select(.name | contains("dev-")) | .name')
-                
-                # Find and deactivate any active dev revision
-                ACTIVE_DEV_REVISION=$(echo "$ALL_REVISIONS" | \
-                  jq -r '.[] | select(.name | contains("dev-")) | select(.active == true) | .name')
-                
-                if [ -n "$ACTIVE_DEV_REVISION" ]; then
-                  echo "Deactivating current active dev revision: $ACTIVE_DEV_REVISION"
-                  az containerapp revision deactivate \
-                    --name ${{ env.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision "$ACTIVE_DEV_REVISION"
+                if [ -n "$EXISTING_DEV_REVISION" ]; then
+                  echo "Existing dev revision found: $EXISTING_DEV_REVISION"
+                  # Extract the existing revision suffix to maintain it
+                  REVISION_SUFFIX=$(echo "$EXISTING_DEV_REVISION" | sed "s/${{ env.CONTAINER_APP_NAME}}--//")
+                  echo "Updating existing dev revision with suffix: $REVISION_SUFFIX"
+                else
+                  echo "No existing dev revision found, creating new one"
+                  REVISION_SUFFIX="dev-${TIMESTAMP}"
+                  echo "Creating new dev revision with suffix: $REVISION_SUFFIX"
                 fi
                 
-                # Keep only last 2 dev revisions
-                DEV_REVISION_COUNT=$(echo "$DEV_REVISIONS" | wc -l)
-                if [ "$DEV_REVISION_COUNT" -gt 2 ]; then
-                  REVISIONS_TO_REMOVE=$((DEV_REVISION_COUNT - 2))
-                  echo "Removing $REVISIONS_TO_REMOVE oldest dev revision(s)"
-                  echo "$DEV_REVISIONS" | head -n "$REVISIONS_TO_REMOVE" | while read -r revision; do
-                    echo "Removing old dev revision: $revision"
-                    az containerapp revision deactivate \
-                      --name ${{ env.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision" || true
-                    # After deactivation, we can delete the revision
-                    az containerapp revision delete \
-                      --name ${{ env.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision" --yes || true
-                  done
-                fi
+                # Deploy or update dev revision
+                az containerapp update \
+                  --name ${{ env.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ env.RESOURCE_GROUP }} \
+                  --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                  --revision-suffix $REVISION_SUFFIX \
+                  --min-replicas $MIN_REPLICAS \
+                  --max-replicas $MAX_REPLICAS \
+                  --set-env-vars \
+                    RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                    STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                    PYTHONUNBUFFERED=1 \
+                    BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                    API_ID=secretref:api-id \
+                    API_HASH=secretref:api-hash
               fi
-              
-              echo "Deploying new revision with suffix: $REVISION_SUFFIX"
-              
-              # Deploy new revision
-              az containerapp update \
-                --name ${{ env.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                --revision-suffix $REVISION_SUFFIX \
-                --min-replicas $MIN_REPLICAS \
-                --max-replicas $MAX_REPLICAS \
-                --set-env-vars \
-                  RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                  STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                  PYTHONUNBUFFERED=1 \
-                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                  API_ID=secretref:api-id \
-                  API_HASH=secretref:api-hash
 
       - name: Verify Deployment
         run: |
