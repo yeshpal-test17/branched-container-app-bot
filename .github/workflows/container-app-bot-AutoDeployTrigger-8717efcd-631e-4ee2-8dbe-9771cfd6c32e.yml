@@ -35,84 +35,54 @@ jobs:
       - name: Set deployment info
         id: set_deployment_info
         run: |
-          # For releases, use the target branch instead of the tag ref
-          if [ "${{ github.event_name }}" == "release" ]; then
-            BRANCH_REF="refs/heads/${{ github.event.release.target_commitish }}"
-            TAG_NAME="${{ github.event.release.tag_name }}"
-            
-            # Validate tag format based on branch
-            if [[ "$BRANCH_REF" == "refs/heads/develop" ]]; then
-              if [[ ! "$TAG_NAME" =~ ^alpha-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "Error: Invalid tag format for develop branch. Must be 'alpha-x.y.z'"
-                exit 1
-              fi
-              echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
-            elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
-              if [[ ! "$TAG_NAME" =~ ^beta-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "Error: Invalid tag format for test branch. Must be 'beta-x.y.z'"
-                exit 1
-              fi
-              echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
-            else
-              echo "Error: Releases are only allowed from develop or test branches."
-              exit 1
-            fi
+          # Determine if this is a production deployment
+          if [[ "${{ github.ref }}" == "refs/heads/prod" ]]; then
+            echo "IS_PROD=true" >> $GITHUB_OUTPUT
+            echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
+            echo "STAGE=prod" >> $GITHUB_OUTPUT
+            echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
+            echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
+            echo "REVISION_SUFFIX=${{ env.PROD_REVISION_SUFFIX }}" >> $GITHUB_OUTPUT
           else
-            BRANCH_REF="${{ github.ref }}"
+            echo "IS_PROD=false" >> $GITHUB_OUTPUT
+            
+            # Set container name based on branch
+            case "${{ github.ref }}" in
+              "refs/heads/develop")
+                echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
+                echo "STAGE=dev" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
+                ;;
+              "refs/heads/test")
+                echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
+                echo "STAGE=test" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
+                ;;
+              "refs/heads/master")
+                echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
+                echo "STAGE=staging" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
+                ;;
+            esac
+            
+            echo "IMAGE_TAG=${{ github.ref_name }}-latest" >> $GITHUB_OUTPUT
+            echo "REVISION_SUFFIX=${{ env.DEV_REVISION_SUFFIX }}" >> $GITHUB_OUTPUT
           fi
 
-          # Set environment variables based on branch
-          case "$BRANCH_REF" in
-            "refs/heads/develop")
-              echo "STAGE=dev" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
-              echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
-              echo "IS_PROD=false" >> $GITHUB_OUTPUT
-              echo "REVISION_SUFFIX=${{ env.DEV_REVISION_SUFFIX }}" >> $GITHUB_OUTPUT
-              ;;
-            "refs/heads/test")
-              echo "STAGE=test" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
-              echo "IMAGE_TAG=test-latest" >> $GITHUB_OUTPUT
-              echo "IS_PROD=false" >> $GITHUB_OUTPUT
-              echo "REVISION_SUFFIX=${{ env.DEV_REVISION_SUFFIX }}" >> $GITHUB_OUTPUT
-              ;;
-            "refs/heads/master")
-              echo "STAGE=staging" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
-              echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
-              echo "IS_PROD=false" >> $GITHUB_OUTPUT
-              echo "REVISION_SUFFIX=${{ env.DEV_REVISION_SUFFIX }}" >> $GITHUB_OUTPUT
-              ;;
-            "refs/heads/prod")
-              echo "STAGE=prod" >> $GITHUB_OUTPUT
-              echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
-              echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
-              echo "IS_PROD=true" >> $GITHUB_OUTPUT
-              echo "REVISION_SUFFIX=${{ env.PROD_REVISION_SUFFIX }}" >> $GITHUB_OUTPUT
-              ;;
-            *)
-              echo "Error: Unsupported branch" >> $GITHUB_OUTPUT
-              exit 1
-              ;;
-          esac
-
-          # Set release tag for other events
-          if [ "${{ github.event_name }}" == "push" ]; then
+          # Set release tag
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
             echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
             echo "RELEASE_TAG=merged-into-${{ github.base.ref }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" != "release" ]; then
+          else
             echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push image to ACR
         run: |
-          # Clean up old images with the same tag if they exist
+          # Clean up old images with the same tag
           az acr repository delete \
             --name ${{ env.ACR_NAME }} \
             --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
@@ -123,140 +93,85 @@ jobs:
             --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
             --file Dockerfile .
 
-
-            
-            
       - name: Manage Container App Revisions
         run: |
-              echo "Getting current revision information..."
-              
-              # Get all revisions ordered by creation time
-              ALL_REVISIONS=$(az containerapp revision list \
-                -n ${{ env.CONTAINER_APP_NAME }} \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[].{name:name, active:properties.active, createdTime:properties.createdTime, containerName:properties.template.containers[0].name} | sort_by(@, &createdTime)" -o json)
-              
-              echo "Current revisions:"
-              echo "$ALL_REVISIONS" | jq '.'
-              
-              # Function to check if revision exists
-              check_revision_exists() {
-                local revision_type=$1
-                echo "$ALL_REVISIONS" | jq -r --arg type "$revision_type" '.[] | select(.name | contains($type)) | .name' | head -n 1
-              }
-              
-              # Get current timestamp for new revision
-              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-              
-              if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-                echo "Managing PROD revision..."
-                REVISION_SUFFIX="prod-${TIMESTAMP}"
-                MIN_REPLICAS="1"
-                MAX_REPLICAS="10"
-                
-                # Find current prod revision
-                CURRENT_PROD_REVISION=$(check_revision_exists "prod-")
-                
-                if [ -n "$CURRENT_PROD_REVISION" ]; then
-                  echo "Deactivating current prod revision: $CURRENT_PROD_REVISION"
-                  az containerapp revision deactivate \
-                    --name ${{ env.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision "$CURRENT_PROD_REVISION"
-                fi
-                
-                # Deploy new prod revision
-                echo "Deploying new prod revision with suffix: $REVISION_SUFFIX"
-                az containerapp update \
-                  --name ${{ env.CONTAINER_APP_NAME }} \
-                  --resource-group ${{ env.RESOURCE_GROUP }} \
-                  --container-name container-app-bot-prod \
-                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                  --revision-suffix $REVISION_SUFFIX \
-                  --min-replicas $MIN_REPLICAS \
-                  --max-replicas $MAX_REPLICAS \
-                  --set-env-vars \
-                    RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                    STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                    PYTHONUNBUFFERED=1 \
-                    BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                    API_ID=secretref:api-id \
-                    API_HASH=secretref:api-hash
-                    
-              else
-                echo "Managing DEV revision..."
-                MIN_REPLICAS="0"
-                MAX_REPLICAS="5"
-                
-                # Check for existing dev revision
-                EXISTING_DEV_REVISION=$(check_revision_exists "dev-")
-                
-                if [ -n "$EXISTING_DEV_REVISION" ]; then
-                  echo "Existing dev revision found: $EXISTING_DEV_REVISION"
-                  # Extract the existing revision suffix to maintain it
-                  REVISION_SUFFIX=$(echo "$EXISTING_DEV_REVISION" | sed "s/${{ env.CONTAINER_APP_NAME}}--//")
-                  echo "Updating existing dev revision with suffix: $REVISION_SUFFIX"
-                else
-                  echo "No existing dev revision found, creating new one"
-                  REVISION_SUFFIX="dev-${TIMESTAMP}"
-                  echo "Creating new dev revision with suffix: $REVISION_SUFFIX"
-                fi
-                
-                # Deploy or update dev revision
-                az containerapp update \
-                  --name ${{ env.CONTAINER_APP_NAME }} \
-                  --resource-group ${{ env.RESOURCE_GROUP }} \
-                  --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                  --revision-suffix $REVISION_SUFFIX \
-                  --min-replicas $MIN_REPLICAS \
-                  --max-replicas $MAX_REPLICAS \
-                  --set-env-vars \
-                    RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                    STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                    PYTHONUNBUFFERED=1 \
-                    BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                    API_ID=secretref:api-id \
-                    API_HASH=secretref:api-hash
-              fi
+          echo "Getting current revision information..."
+          
+          # Get all revisions
+          ALL_REVISIONS=$(az containerapp revision list \
+            -n ${{ env.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[].{name:name, active:properties.active, createdTime:properties.createdTime}" -o json)
+          
+          if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+            echo "Managing PROD revision..."
+            
+            # Deactivate any existing prod revision
+            CURRENT_PROD_REVISION=$(echo "$ALL_REVISIONS" | jq -r '.[] | select(.name | contains("prod-revision")) | .name' | head -n 1)
+            if [ -n "$CURRENT_PROD_REVISION" ]; then
+              echo "Deactivating current prod revision: $CURRENT_PROD_REVISION"
+              az containerapp revision deactivate \
+                --name ${{ env.CONTAINER_APP_NAME }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --revision "$CURRENT_PROD_REVISION"
+            fi
+            
+            # Deploy new prod revision
+            az containerapp update \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --container-name container-app-bot-prod \
+              --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+              --revision-suffix ${{ env.PROD_REVISION_SUFFIX }} \
+              --min-replicas 1 \
+              --max-replicas 10 \
+              --set-env-vars \
+                RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                PYTHONUNBUFFERED=1 \
+                BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                API_ID=secretref:api-id \
+                API_HASH=secretref:api-hash
+          else
+            echo "Managing DEV revision..."
+            
+            # Update or create dev revision
+            az containerapp update \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+              --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+              --revision-suffix ${{ env.DEV_REVISION_SUFFIX }} \
+              --min-replicas 0 \
+              --max-replicas 5 \
+              --set-env-vars \
+                RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                PYTHONUNBUFFERED=1 \
+                BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                API_ID=secretref:api-id \
+                API_HASH=secretref:api-hash
+          fi
 
       - name: Verify Deployment
         run: |
-              echo "Verifying deployment..."
-              
-              # Increase wait time to ensure deployment is complete
-              echo "Waiting for deployment to stabilize..."
-              sleep 60
-              
-              # Get current active revisions
-              ACTIVE_REVISIONS=$(az containerapp revision list \
-                -n ${{ env.CONTAINER_APP_NAME }} \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
-              
-              echo "Current active revisions:"
-              echo "$ACTIVE_REVISIONS" | jq '.'
-              
-              # Get timestamp from earlier for verification
-              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-              # Define expected suffix pattern based on deployment type
-              if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-                SUFFIX_PATTERN="prod-"
-              else
-                SUFFIX_PATTERN="dev-"
-              fi
-              
-              EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-              echo "Looking for revision with suffix pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
-              
-              # More detailed verification
-              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
-                echo "✅ Deployment successful - Found active revision with correct suffix pattern and container"
-                echo "Active revision details:"
-                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
-              else
-                echo "❌ Deployment verification failed - No matching active revision found"
-                echo "All active revisions:"
-                echo "$ACTIVE_REVISIONS" | jq '.'
-                exit 1
-              fi
+          echo "Verifying deployment..."
+          sleep 60
+          
+          # Get current active revisions
+          ACTIVE_REVISIONS=$(az containerapp revision list \
+            -n ${{ env.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active].{name:name, replicas:properties.replicas}" -o json)
+          
+          echo "Current active revisions:"
+          echo "$ACTIVE_REVISIONS" | jq '.'
+          
+          # Verify correct revision is active
+          EXPECTED_SUFFIX=${{ steps.set_deployment_info.outputs.REVISION_SUFFIX }}
+          if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$EXPECTED_SUFFIX\"))" > /dev/null; then
+            echo "✅ Deployment successful - Found active revision with correct suffix"
+          else
+            echo "❌ Deployment verification failed - No matching active revision found"
+            exit 1
+          fi
