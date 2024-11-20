@@ -32,6 +32,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+          
       - name: Set deployment info
         id: set_deployment_info
         run: |
