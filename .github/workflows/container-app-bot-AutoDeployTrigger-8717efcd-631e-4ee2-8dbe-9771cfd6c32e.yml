@@ -12,6 +12,7 @@ on:
 permissions: 
   contents: read
 
+  
 env:
   ACR_NAME: ca20a502fbd8acr
   RESOURCE_GROUP: container-app-rsgp
