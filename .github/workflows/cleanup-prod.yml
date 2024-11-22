@@ -1,0 +1,81 @@
+name: Cleanup Prod Revision
+
+on:
+  workflow_dispatch:  # Manual trigger
+
+permissions: 
+  contents: read
+
+env:
+  ACR_NAME: ca20a502fbd8acr
+  RESOURCE_GROUP: container-app-rsgp
+  CONTAINER_APP_NAME: branched-container-app-bot
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Cleanup Prod Revision
+        run: |
+          echo "Getting current prod revision..."
+          
+          # Get current prod revision
+          PROD_REVISION=$(az containerapp revision list \
+            -n ${{ env.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?contains(name, 'prod-')].{name:name, active:properties.active} | [?active].name" -o tsv)
+          
+          echo "Current prod revision: $PROD_REVISION"
+          
+          if [ -n "$PROD_REVISION" ]; then
+            echo "Updating prod revision to have only prod container..."
+            
+            # Update prod revision to only have prod container
+            az containerapp revision update \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --revision $PROD_REVISION \
+              --remove containers \
+              --containers \
+                container-app-bot-prod=${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:prod-latest \
+              --set-env-vars \
+                RELEASE_TAG=cleanup-revision \
+                STAGE=prod \
+                PYTHONUNBUFFERED=1 \
+                BOT_TOKEN=secretref:prod-bot-token \
+                API_ID=secretref:api-id \
+                API_HASH=secretref:api-hash
+                
+            echo "✅ Prod revision updated successfully"
+          else
+            echo "❌ No active prod revision found"
+            exit 1
+          fi
+
+      - name: Verify Cleanup
+        run: |
+          echo "Verifying cleanup..."
+          sleep 30
+          
+          # Get containers in prod revision
+          CONTAINERS=$(az containerapp revision list \
+            -n ${{ env.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?contains(name, 'prod-')].{name:name, containers:properties.template.containers[].name}" -o json)
+          
+          echo "Current containers in prod revision:"
+          echo "$CONTAINERS" | jq '.'
+          
+          # Verify only prod container exists
+          if echo "$CONTAINERS" | jq -e '.[] | select(.containers | length == 1 and contains(["container-app-bot-prod"]))' > /dev/null; then
+            echo "✅ Cleanup successful - Only prod container remains"
+          else
+            echo "❌ Cleanup verification failed - Unexpected containers found"
+            exit 1
+          fi
