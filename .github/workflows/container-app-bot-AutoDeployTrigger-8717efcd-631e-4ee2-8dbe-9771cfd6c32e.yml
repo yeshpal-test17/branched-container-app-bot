@@ -149,20 +149,18 @@ jobs:
                 if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                   echo "Managing PROD revision..."
                   
-                  # Get current prod revision
-                  CURRENT_PROD_REVISION=$(echo "$ALL_REVISIONS" | jq -r '.[] | select(.name | contains("prod-")) | .name' | head -n 1)
-                  
                   # Get current timestamp for new prod revision
                   TIMESTAMP=$(date +%Y%m%d%H%M%S)
                   NEW_PROD_REVISION="prod-${TIMESTAMP}"
                   
-                  # Create new prod revision
+                  # Create new prod revision with only prod container
                   echo "Creating new prod revision: ${NEW_PROD_REVISION}"
                   az containerapp update \
                     --name ${{ env.CONTAINER_APP_NAME }} \
                     --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --container-name container-app-bot-prod \
-                    --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                    --remove containers \
+                    --containers \
+                      container-app-bot-prod=${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                     --revision-suffix "${NEW_PROD_REVISION}" \
                     --min-replicas 1 \
                     --max-replicas 10 \
@@ -178,15 +176,16 @@ jobs:
                   echo "Waiting for new prod revision to be ready..."
                   sleep 30
                   
-                  # Deactivate old prod revision if exists
-                  if [ -n "$CURRENT_PROD_REVISION" ]; then
-                    echo "Deactivating old prod revision: $CURRENT_PROD_REVISION"
-                    az containerapp revision deactivate \
-                      --name ${{ env.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$CURRENT_PROD_REVISION"
-                  fi
-                  
+                  # Deactivate old prod revisions
+                  echo "$ALL_REVISIONS" | jq -r '.[] | select(.name | contains("prod-")) | .name' | while read -r revision; do
+                    if [ -n "$revision" ]; then
+                      echo "Deactivating old prod revision: $revision"
+                      az containerapp revision deactivate \
+                        --name ${{ env.CONTAINER_APP_NAME }} \
+                        --resource-group ${{ env.RESOURCE_GROUP }} \
+                        --revision "$revision" || true
+                    fi
+                  done
                   
                   # Clean up old prod revisions (keep latest 2)
                   echo "Cleaning up old prod revisions..."
@@ -226,13 +225,14 @@ jobs:
                     sleep 30
                   fi
                   
-                  # Create new dev revision
+                  # Create new dev revision with appropriate container
                   echo "Creating new dev revision: ${NEW_DEV_REVISION}"
                   az containerapp update \
                     --name ${{ env.CONTAINER_APP_NAME }} \
                     --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                    --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                    --remove containers \
+                    --containers \
+                      ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}=${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                     --revision-suffix "${NEW_DEV_REVISION}" \
                     --min-replicas 0 \
                     --max-replicas 5 \
@@ -248,7 +248,7 @@ jobs:
                   echo "Cleaning up old dev revisions..."
                   az containerapp revision list \
                     -n ${{ env.CONTAINER_APP_NAME }} \
-                    -g ${{ env.RESOURCE_GROUP }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
                     --query "[?contains(name, 'dev-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json | \
                     jq -r '.[:-3][].name' | while read -r old_revision; do
                     if [ -n "$old_revision" ]; then
@@ -270,22 +270,24 @@ jobs:
                 ACTIVE_REVISIONS=$(az containerapp revision list \
                   -n ${{ env.CONTAINER_APP_NAME }} \
                   -g ${{ env.RESOURCE_GROUP }} \
-                  --query "[?properties.active].{name:name, replicas:properties.replicas}" -o json)
+                  --query "[?properties.active].{name:name, replicas:properties.replicas, containers:properties.template.containers[].name}" -o json)
                 
                 echo "Current active revisions:"
                 echo "$ACTIVE_REVISIONS" | jq '.'
                 
-                # Get expected suffix pattern
+                # Get expected suffix pattern and container name
                 if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                   SUFFIX_PATTERN="prod-"
+                  EXPECTED_CONTAINER="container-app-bot-prod"
                 else
                   SUFFIX_PATTERN="dev-"
+                  EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
                 fi
                 
-                # Verify correct revision is active
-                if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))" > /dev/null; then
-                  echo "✅ Deployment successful - Found active revision with correct suffix"
+                # Verify correct revision is active with correct container
+                if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.containers[] | contains(\"$EXPECTED_CONTAINER\"))" > /dev/null; then
+                  echo "✅ Deployment successful - Found active revision with correct suffix and container"
                 else
-                  echo "❌ Deployment verification failed - No matching active revision found"
+                  echo "❌ Deployment verification failed - No matching active revision found or incorrect container"
                   exit 1
                 fi
