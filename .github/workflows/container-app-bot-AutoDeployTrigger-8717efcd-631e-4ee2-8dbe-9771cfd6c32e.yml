@@ -20,7 +20,7 @@ env:
   DEV_REVISION_SUFFIX: dev-revision
 
   
-  
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -186,6 +186,7 @@ jobs:
                       --resource-group ${{ env.RESOURCE_GROUP }} \
                       --revision "$CURRENT_PROD_REVISION"
                   fi
+                  
                   
                   # Clean up old prod revisions (keep latest 2)
                   echo "Cleaning up old prod revisions..."
