@@ -141,125 +141,109 @@ jobs:
               
       - name: Manage Container App Revisions
         run: |
-                      echo "Getting current revision information..."
-                      
-                      # Get all revisions
-                      ALL_REVISIONS=$(az containerapp revision list \
-                        -n ${{ env.CONTAINER_APP_NAME }} \
-                        -g ${{ env.RESOURCE_GROUP }} \
-                        --query "[].{name:name, active:properties.active, createdTime:properties.createdTime}" -o json)
-                      
-                      if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-                        echo "Managing PROD revision..."
-                        
-                        # Get current prod revision
-                        CURRENT_PROD_REVISION=$(echo "$ALL_REVISIONS" | jq -r '.[] | select(.name | contains("prod-")) | .name' | head -n 1)
-                        
-                        # Get current timestamp for new prod revision
-                        TIMESTAMP=$(date +%Y%m%d%H%M%S)
-                        NEW_PROD_REVISION="prod-${TIMESTAMP}"
-      
-                        # First, deactivate existing revisions
-                        echo "Deactivating existing revisions..."
-                        az containerapp revision list \
-                          -n ${{ env.CONTAINER_APP_NAME }} \
-                          -g ${{ env.RESOURCE_GROUP }} \
-                          --query "[].name" -o tsv | while read -r revision; do
-                          if [ -n "$revision" ]; then
-                            echo "Deactivating revision: $revision"
-                            az containerapp revision deactivate \
-                              --name ${{ env.CONTAINER_APP_NAME }} \
-                              --resource-group ${{ env.RESOURCE_GROUP }} \
-                              --revision "$revision" || true
-                          fi
-                        done
-                        
-                        # Create new prod revision with environment variables in a different format
-                        echo "Creating new prod revision: ${NEW_PROD_REVISION}"
-                        az containerapp update \
-                          --name ${{ env.CONTAINER_APP_NAME }} \
-                          --resource-group ${{ env.RESOURCE_GROUP }} \
-                          --remove containers \
-                          --containers container-app-bot-prod=${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                          --revision-suffix "${NEW_PROD_REVISION}" \
-                          --min-replicas 1 \
-                          --max-replicas 10 \
-                          --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                          --set-env-vars STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
-                          --set-env-vars PYTHONUNBUFFERED="1" \
-                          --set-env-vars BOT_TOKEN="@Microsoft.KeyVault(SecretUri=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }})" \
-                          --set-env-vars API_ID="@Microsoft.KeyVault(SecretUri=api-id)" \
-                          --set-env-vars API_HASH="@Microsoft.KeyVault(SecretUri=api-hash)"
-      
-                        # After successful creation, clean up old revisions
-                        echo "Cleaning up old revisions..."
-                        az containerapp revision list \
-                          -n ${{ env.CONTAINER_APP_NAME }} \
-                          -g ${{ env.RESOURCE_GROUP }} \
-                          --query "[?properties.active==false].name" -o tsv | while read -r old_revision; do
-                          if [ -n "$old_revision" ]; then
-                            echo "Deactivating inactive revision: $old_revision"
-                            az containerapp revision deactivate \
-                              --name ${{ env.CONTAINER_APP_NAME }} \
-                              --resource-group ${{ env.RESOURCE_GROUP }} \
-                              --revision "$old_revision" || true
-                          fi
-                        done
-                      
-                      else
-                        echo "Managing DEV revision..."
-                        
-                        # Get timestamp for new dev revision
-                        TIMESTAMP=$(date +%Y%m%d%H%M%S)
-                        NEW_DEV_REVISION="dev-${TIMESTAMP}"
-      
-                        # First, deactivate existing revisions
-                        echo "Deactivating existing revisions..."
-                        az containerapp revision list \
-                          -n ${{ env.CONTAINER_APP_NAME }} \
-                          -g ${{ env.RESOURCE_GROUP }} \
-                          --query "[].name" -o tsv | while read -r revision; do
-                          if [ -n "$revision" ]; then
-                            echo "Deactivating revision: $revision"
-                            az containerapp revision deactivate \
-                              --name ${{ env.CONTAINER_APP_NAME }} \
-                              --resource-group ${{ env.RESOURCE_GROUP }} \
-                              --revision "$revision" || true
-                          fi
-                        done
-                        
-                        # Create new dev revision
-                        echo "Creating new dev revision: ${NEW_DEV_REVISION}"
-                        az containerapp update \
-                          --name ${{ env.CONTAINER_APP_NAME }} \
-                          --resource-group ${{ env.RESOURCE_GROUP }} \
-                          --remove containers \
-                          --containers ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}=${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                          --revision-suffix "${NEW_DEV_REVISION}" \
-                          --min-replicas 0 \
-                          --max-replicas 5 \
-                          --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                          --set-env-vars STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
-                          --set-env-vars PYTHONUNBUFFERED="1" \
-                          --set-env-vars BOT_TOKEN="@Microsoft.KeyVault(SecretUri=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }})" \
-                          --set-env-vars API_ID="@Microsoft.KeyVault(SecretUri=api-id)" \
-                          --set-env-vars API_HASH="@Microsoft.KeyVault(SecretUri=api-hash)"
-      
-                        # After successful creation, clean up old revisions
-                        echo "Cleaning up old revisions..."
-                        az containerapp revision list \
-                          -n ${{ env.CONTAINER_APP_NAME }} \
-                          -g ${{ env.RESOURCE_GROUP }} \
-                          --query "[?properties.active==false].name" -o tsv | while read -r old_revision; do
-                          if [ -n "$old_revision" ]; then
-                            echo "Deactivating inactive revision: $old_revision"
-                            az containerapp revision deactivate \
-                              --name ${{ env.CONTAINER_APP_NAME }} \
-                              --resource-group ${{ env.RESOURCE_GROUP }} \
-                              --revision "$old_revision" || true
-                          fi
-                        done
-                      fi
+                echo "Getting current revision information..."
+                
+                # Get all revisions
+                ALL_REVISIONS=$(az containerapp revision list \
+                  -n ${{ env.CONTAINER_APP_NAME }} \
+                  -g ${{ env.RESOURCE_GROUP }} \
+                  --query "[].{name:name, active:properties.active, createdTime:properties.createdTime}" -o json)
+                
+                if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+                  echo "Managing PROD revision..."
+                  
+                  # Get current prod revision
+                  CURRENT_PROD_REVISION=$(echo "$ALL_REVISIONS" | jq -r '.[] | select(.name | contains("prod-")) | .name' | head -n 1)
+                  
+                  # Get current timestamp for new prod revision
+                  TIMESTAMP=$(date +%Y%m%d%H%M%S)
+                  NEW_PROD_REVISION="prod-${TIMESTAMP}"
+
+                  # First, deactivate existing revisions
+                  echo "Deactivating existing revisions..."
+                  az containerapp revision list \
+                    -n ${{ env.CONTAINER_APP_NAME }} \
+                    -g ${{ env.RESOURCE_GROUP }} \
+                    --query "[].name" -o tsv | while read -r revision; do
+                    if [ -n "$revision" ]; then
+                      echo "Deactivating revision: $revision"
+                      az containerapp revision deactivate \
+                        --name ${{ env.CONTAINER_APP_NAME }} \
+                        --resource-group ${{ env.RESOURCE_GROUP }} \
+                        --revision "$revision" || true
+                    fi
+                  done
+
+                  # Create JSON for environment variables
+                  cat > env.json << EOF
+{
+  "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
+  "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
+  "PYTHONUNBUFFERED": "1",
+  "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
+  "API_ID": "secretref:api-id",
+  "API_HASH": "secretref:api-hash"
+}
+EOF
+                  
+                  # Create new prod revision
+                  echo "Creating new prod revision: ${NEW_PROD_REVISION}"
+                  az containerapp update \
+                    --name ${{ env.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --remove containers \
+                    --containers container-app-bot-prod=${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                    --revision-suffix "${NEW_PROD_REVISION}" \
+                    --min-replicas 1 \
+                    --max-replicas 10 \
+                    --set-env-vars "@env.json"
+                
+                else
+                  echo "Managing DEV revision..."
+                  
+                  # Get timestamp for new dev revision
+                  TIMESTAMP=$(date +%Y%m%d%H%M%S)
+                  NEW_DEV_REVISION="dev-${TIMESTAMP}"
+
+                  # First, deactivate existing revisions
+                  echo "Deactivating existing revisions..."
+                  az containerapp revision list \
+                    -n ${{ env.CONTAINER_APP_NAME }} \
+                    -g ${{ env.RESOURCE_GROUP }} \
+                    --query "[].name" -o tsv | while read -r revision; do
+                    if [ -n "$revision" ]; then
+                      echo "Deactivating revision: $revision"
+                      az containerapp revision deactivate \
+                        --name ${{ env.CONTAINER_APP_NAME }} \
+                        --resource-group ${{ env.RESOURCE_GROUP }} \
+                        --revision "$revision" || true
+                    fi
+                  done
+
+                  # Create JSON for environment variables
+                  cat > env.json << EOF
+{
+  "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
+  "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
+  "PYTHONUNBUFFERED": "1",
+  "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
+  "API_ID": "secretref:api-id",
+  "API_HASH": "secretref:api-hash"
+}
+EOF
+                  
+                  # Create new dev revision
+                  echo "Creating new dev revision: ${NEW_DEV_REVISION}"
+                  az containerapp update \
+                    --name ${{ env.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --remove containers \
+                    --containers ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}=${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                    --revision-suffix "${NEW_DEV_REVISION}" \
+                    --min-replicas 0 \
+                    --max-replicas 5 \
+                    --set-env-vars "@env.json"
+                fi
       
       - name: Verify Deployment
         run: |
