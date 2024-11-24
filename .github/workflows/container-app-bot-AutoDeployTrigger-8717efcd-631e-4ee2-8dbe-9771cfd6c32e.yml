@@ -154,6 +154,36 @@ jobs:
                         TIMESTAMP=$(date +%Y%m%d%H%M%S)
                         NEW_PROD_REVISION="prod-${TIMESTAMP}"
                         
+                        # Create environmental variables JSON
+                        echo '{
+                          "env": [
+                            {
+                              "name": "RELEASE_TAG",
+                              "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
+                            },
+                            {
+                              "name": "STAGE",
+                              "value": "${{ steps.set_deployment_info.outputs.STAGE }}"
+                            },
+                            {
+                              "name": "PYTHONUNBUFFERED",
+                              "value": "1"
+                            },
+                            {
+                              "name": "BOT_TOKEN",
+                              "secretRef": "${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
+                            },
+                            {
+                              "name": "API_ID",
+                              "secretRef": "api-id"
+                            },
+                            {
+                              "name": "API_HASH",
+                              "secretRef": "api-hash"
+                            }
+                          ]
+                        }' > env-settings.json
+                        
                         # Create new prod revision with only prod container
                         echo "Creating new prod revision: ${NEW_PROD_REVISION}"
                         az containerapp update \
@@ -164,13 +194,7 @@ jobs:
                           --revision-suffix "${NEW_PROD_REVISION}" \
                           --min-replicas 1 \
                           --max-replicas 10 \
-                          --set-env-vars \
-                          RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                          STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                          PYTHONUNBUFFERED=1 \
-                          BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                          API_ID=secretref:api-id \
-                          API_HASH=secretref:api-hash
+                          --env-vars '@env-settings.json'
             
                       else
                         echo "Managing DEV revision..."
@@ -194,6 +218,36 @@ jobs:
                           sleep 30
                         fi
                         
+                        # Create environmental variables JSON
+                        echo '{
+                          "env": [
+                            {
+                              "name": "RELEASE_TAG",
+                              "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
+                            },
+                            {
+                              "name": "STAGE",
+                              "value": "${{ steps.set_deployment_info.outputs.STAGE }}"
+                            },
+                            {
+                              "name": "PYTHONUNBUFFERED",
+                              "value": "1"
+                            },
+                            {
+                              "name": "BOT_TOKEN",
+                              "secretRef": "${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
+                            },
+                            {
+                              "name": "API_ID",
+                              "secretRef": "api-id"
+                            },
+                            {
+                              "name": "API_HASH",
+                              "secretRef": "api-hash"
+                            }
+                          ]
+                        }' > env-settings.json
+                        
                         # Create new dev revision with appropriate container
                         echo "Creating new dev revision: ${NEW_DEV_REVISION}"
                         az containerapp update \
@@ -204,13 +258,7 @@ jobs:
                           --revision-suffix "${NEW_DEV_REVISION}" \
                           --min-replicas 0 \
                           --max-replicas 5 \
-                          --set-env-vars \
-                          RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                          STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                          PYTHONUNBUFFERED=1 \
-                          BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                          API_ID=secretref:api-id \
-                          API_HASH=secretref:api-hash
+                          --env-vars '@env-settings.json'
                         
                         # Clean up old dev revisions (keep latest 3)
                         echo "Cleaning up old dev revisions..."
