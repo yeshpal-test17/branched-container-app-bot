@@ -137,6 +137,7 @@ jobs:
               --file Dockerfile \
               .
 
+              
       - name: Manage Container App Revisions
         run: |
                 echo "Getting current revision information..."
