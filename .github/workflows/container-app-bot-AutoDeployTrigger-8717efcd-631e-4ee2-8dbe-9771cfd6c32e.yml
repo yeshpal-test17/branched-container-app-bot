@@ -145,7 +145,7 @@ jobs:
                 ALL_REVISIONS=$(az containerapp revision list \
                   -n ${{ env.CONTAINER_APP_NAME }} \
                   -g ${{ env.RESOURCE_GROUP }} \
-                  --query "[].{name:name, active:properties.active, createdTime:properties.createdTime, containers:properties.template.containers[].name}" -o json)
+                  --query "[].{name:name, active:properties.active, createdTime:properties.createdTime}" -o json)
                 
                 if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                   echo "Managing PROD revision..."
@@ -164,13 +164,12 @@ jobs:
                     --revision-suffix "${NEW_PROD_REVISION}" \
                     --min-replicas 1 \
                     --max-replicas 10 \
-                    --env-vars \
-                      RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                      STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                      PYTHONUNBUFFERED=1 \
-                      "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                      "API_ID=secretref:api-id" \
-                      "API_HASH=secretref:api-hash"
+                    --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                    --set-env-vars STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
+                    --set-env-vars PYTHONUNBUFFERED="1" \
+                    --set-env-vars BOT_TOKEN="secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                    --set-env-vars API_ID="secretref:api-id" \
+                    --set-env-vars API_HASH="secretref:api-hash"
       
                 else
                   echo "Managing DEV revision..."
@@ -204,13 +203,12 @@ jobs:
                     --revision-suffix "${NEW_DEV_REVISION}" \
                     --min-replicas 0 \
                     --max-replicas 5 \
-                    --env-vars \
-                      RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                      STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                      PYTHONUNBUFFERED=1 \
-                      "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                      "API_ID=secretref:api-id" \
-                      "API_HASH=secretref:api-hash"
+                    --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                    --set-env-vars STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
+                    --set-env-vars PYTHONUNBUFFERED="1" \
+                    --set-env-vars BOT_TOKEN="secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                    --set-env-vars API_ID="secretref:api-id" \
+                    --set-env-vars API_HASH="secretref:api-hash"
       
                   # Clean up old dev revisions (keep latest 3)
                   echo "Cleaning up old dev revisions..."
