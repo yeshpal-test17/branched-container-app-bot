@@ -211,41 +211,58 @@ jobs:
                             "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
                             "API_ID=secretref:api-id" \
                             "API_HASH=secretref:api-hash"
+                        
+                        # Clean up old dev revisions (keep latest 3)
+                        echo "Cleaning up old dev revisions..."
+                        az containerapp revision list \
+                          -n ${{ env.CONTAINER_APP_NAME }} \
+                          -g ${{ env.RESOURCE_GROUP }} \
+                          --query "[?contains(name, 'dev-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json | \
+                          jq -r '.[:-3][].name' | while read -r old_revision; do
+                          if [ -n "$old_revision" ]; then
+                            echo "Deleting old revision: $old_revision"
+                            az containerapp revision delete \
+                              --name ${{ env.CONTAINER_APP_NAME }} \
+                              --resource-group ${{ env.RESOURCE_GROUP }} \
+                              --revision "$old_revision" --yes || true
+                          fi
+                        done
+                      fi
       
       - name: Verify Deployment
         run: |
-                echo "Verifying deployment..."
-                sleep 60
-                
-                # Get current active revisions with container info
-                ACTIVE_REVISIONS=$(az containerapp revision list \
-                  -n ${{ env.CONTAINER_APP_NAME }} \
-                  -g ${{ env.RESOURCE_GROUP }} \
-                  --query "[?properties.active].{name:name, replicas:properties.replicas, containers:properties.template.containers[].name}" -o json)
-                
-                echo "Current active revisions:"
-                echo "$ACTIVE_REVISIONS" | jq '.'
-                
-                # Get expected container name
-                EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-                
-                # Verify correct container in the revision
-                if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-                  EXPECTED_CONTAINER="container-app-bot-prod"
-                  SUFFIX_PATTERN="prod-"
-                else
-                  SUFFIX_PATTERN="dev-"
-                fi
-                
-                # Verify container and revision
-                if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.containers | contains([\"$EXPECTED_CONTAINER\"]))" > /dev/null; then
-                  echo "✅ Deployment successful - Found active revision with correct container"
-                  echo "Active revision details:"
-                  echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))"
-                else
-                  echo "❌ Deployment verification failed"
-                  echo "Expected container: $EXPECTED_CONTAINER"
-                  echo "Current active revisions:"
-                  echo "$ACTIVE_REVISIONS" | jq '.'
-                  exit 1
-                fi
+                      echo "Verifying deployment..."
+                      sleep 60
+                      
+                      # Get current active revisions with container info
+                      ACTIVE_REVISIONS=$(az containerapp revision list \
+                        -n ${{ env.CONTAINER_APP_NAME }} \
+                        -g ${{ env.RESOURCE_GROUP }} \
+                        --query "[?properties.active].{name:name, replicas:properties.replicas, containers:properties.template.containers[].name}" -o json)
+                      
+                      echo "Current active revisions:"
+                      echo "$ACTIVE_REVISIONS" | jq '.'
+                      
+                      # Get expected container name
+                      EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+                      
+                      # Verify correct container in the revision
+                      if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+                        EXPECTED_CONTAINER="container-app-bot-prod"
+                        SUFFIX_PATTERN="prod-"
+                      else
+                        SUFFIX_PATTERN="dev-"
+                      fi
+                      
+                      # Verify container and revision
+                      if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.containers | contains([\"$EXPECTED_CONTAINER\"]))" > /dev/null; then
+                        echo "✅ Deployment successful - Found active revision with correct container"
+                        echo "Active revision details:"
+                        echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))"
+                      else
+                        echo "❌ Deployment verification failed"
+                        echo "Expected container: $EXPECTED_CONTAINER"
+                        echo "Current active revisions:"
+                        echo "$ACTIVE_REVISIONS" | jq '.'
+                        exit 1
+                      fi
