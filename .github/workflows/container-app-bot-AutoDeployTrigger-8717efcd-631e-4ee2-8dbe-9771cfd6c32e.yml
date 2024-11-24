@@ -164,13 +164,12 @@ jobs:
                           --revision-suffix "${NEW_PROD_REVISION}" \
                           --min-replicas 1 \
                           --max-replicas 10 \
-                          --set-env-vars \
-                            RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                            STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
-                            PYTHONUNBUFFERED="1" \
-                            "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                            "API_ID=secretref:api-id" \
-                            "API_HASH=secretref:api-hash"
+                          --set-env-vars "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                          --set-env-vars "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                          --set-env-vars "PYTHONUNBUFFERED=1" \
+                          --set-secrets "BOT_TOKEN=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                          --set-secrets "API_ID=api-id" \
+                          --set-secrets "API_HASH=api-hash"
             
                       else
                         echo "Managing DEV revision..."
@@ -204,13 +203,12 @@ jobs:
                           --revision-suffix "${NEW_DEV_REVISION}" \
                           --min-replicas 0 \
                           --max-replicas 5 \
-                          --set-env-vars \
-                            RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                            STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
-                            PYTHONUNBUFFERED="1" \
-                            "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                            "API_ID=secretref:api-id" \
-                            "API_HASH=secretref:api-hash"
+                          --set-env-vars "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                          --set-env-vars "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                          --set-env-vars "PYTHONUNBUFFERED=1" \
+                          --set-secrets "BOT_TOKEN=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                          --set-secrets "API_ID=api-id" \
+                          --set-secrets "API_HASH=api-hash"
                         
                         # Clean up old dev revisions (keep latest 3)
                         echo "Cleaning up old dev revisions..."
