@@ -141,6 +141,7 @@ jobs:
               
       - name: Manage Container App Revisions
         run: |
+
                 echo "Getting current revision information..."
                 
                 # Get all revisions
@@ -176,15 +177,15 @@ jobs:
 
                   # Create JSON for environment variables
                   cat > env.json << EOF
-{
-  "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
-  "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
-  "PYTHONUNBUFFERED": "1",
-  "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
-  "API_ID": "secretref:api-id",
-  "API_HASH": "secretref:api-hash"
-}
-EOF
+                  {
+                    "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
+                    "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
+                    "PYTHONUNBUFFERED": "1",
+                    "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
+                    "API_ID": "secretref:api-id",
+                    "API_HASH": "secretref:api-hash"
+                  }
+                  EOF
                   
                   # Create new prod revision
                   echo "Creating new prod revision: ${NEW_PROD_REVISION}"
@@ -222,15 +223,15 @@ EOF
 
                   # Create JSON for environment variables
                   cat > env.json << EOF
-{
-  "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
-  "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
-  "PYTHONUNBUFFERED": "1",
-  "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
-  "API_ID": "secretref:api-id",
-  "API_HASH": "secretref:api-hash"
-}
-EOF
+                  {
+                    "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
+                    "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
+                    "PYTHONUNBUFFERED": "1",
+                    "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
+                    "API_ID": "secretref:api-id",
+                    "API_HASH": "secretref:api-hash"
+                  }
+                  EOF
                   
                   # Create new dev revision
                   echo "Creating new dev revision: ${NEW_DEV_REVISION}"
