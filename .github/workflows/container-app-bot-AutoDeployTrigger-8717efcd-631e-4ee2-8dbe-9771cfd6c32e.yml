@@ -159,26 +159,22 @@ jobs:
                         TIMESTAMP=$(date +%Y%m%d%H%M%S)
                         NEW_PROD_REVISION="prod-${TIMESTAMP}"
       
-                        # First, remove any existing revisions to clean slate
-                        echo "Removing existing revisions..."
+                        # First, deactivate existing revisions
+                        echo "Deactivating existing revisions..."
                         az containerapp revision list \
                           -n ${{ env.CONTAINER_APP_NAME }} \
                           -g ${{ env.RESOURCE_GROUP }} \
                           --query "[].name" -o tsv | while read -r revision; do
                           if [ -n "$revision" ]; then
-                            echo "Deactivating and deleting revision: $revision"
+                            echo "Deactivating revision: $revision"
                             az containerapp revision deactivate \
                               --name ${{ env.CONTAINER_APP_NAME }} \
                               --resource-group ${{ env.RESOURCE_GROUP }} \
                               --revision "$revision" || true
-                            az containerapp revision delete \
-                              --name ${{ env.CONTAINER_APP_NAME }} \
-                              --resource-group ${{ env.RESOURCE_GROUP }} \
-                              --revision "$revision" --yes || true
                           fi
                         done
                         
-                        # Create new prod revision
+                        # Create new prod revision with environment variables in a different format
                         echo "Creating new prod revision: ${NEW_PROD_REVISION}"
                         az containerapp update \
                           --name ${{ env.CONTAINER_APP_NAME }} \
@@ -188,41 +184,47 @@ jobs:
                           --revision-suffix "${NEW_PROD_REVISION}" \
                           --min-replicas 1 \
                           --max-replicas 10 \
-                          --environment-variables \
-                            RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                            STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
-                            PYTHONUNBUFFERED="1" \
-                          --secrets \
-                            "BOT_TOKEN=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                            "API_ID=api-id" \
-                            "API_HASH=api-hash"
+                          --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                          --set-env-vars STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
+                          --set-env-vars PYTHONUNBUFFERED="1" \
+                          --set-env-vars BOT_TOKEN="@Microsoft.KeyVault(SecretUri=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }})" \
+                          --set-env-vars API_ID="@Microsoft.KeyVault(SecretUri=api-id)" \
+                          --set-env-vars API_HASH="@Microsoft.KeyVault(SecretUri=api-hash)"
+      
+                        # After successful creation, clean up old revisions
+                        echo "Cleaning up old revisions..."
+                        az containerapp revision list \
+                          -n ${{ env.CONTAINER_APP_NAME }} \
+                          -g ${{ env.RESOURCE_GROUP }} \
+                          --query "[?properties.active==false].name" -o tsv | while read -r old_revision; do
+                          if [ -n "$old_revision" ]; then
+                            echo "Deactivating inactive revision: $old_revision"
+                            az containerapp revision deactivate \
+                              --name ${{ env.CONTAINER_APP_NAME }} \
+                              --resource-group ${{ env.RESOURCE_GROUP }} \
+                              --revision "$old_revision" || true
+                          fi
+                        done
                       
                       else
                         echo "Managing DEV revision..."
-                        
-                        # Get current active dev revision
-                        CURRENT_DEV_REVISION=$(echo "$ALL_REVISIONS" | jq -r '.[] | select(.name | contains("dev-") and .active == true) | .name' | head -n 1)
                         
                         # Get timestamp for new dev revision
                         TIMESTAMP=$(date +%Y%m%d%H%M%S)
                         NEW_DEV_REVISION="dev-${TIMESTAMP}"
       
-                        # First, remove any existing revisions to clean slate
-                        echo "Removing existing revisions..."
+                        # First, deactivate existing revisions
+                        echo "Deactivating existing revisions..."
                         az containerapp revision list \
                           -n ${{ env.CONTAINER_APP_NAME }} \
                           -g ${{ env.RESOURCE_GROUP }} \
                           --query "[].name" -o tsv | while read -r revision; do
                           if [ -n "$revision" ]; then
-                            echo "Deactivating and deleting revision: $revision"
+                            echo "Deactivating revision: $revision"
                             az containerapp revision deactivate \
                               --name ${{ env.CONTAINER_APP_NAME }} \
                               --resource-group ${{ env.RESOURCE_GROUP }} \
                               --revision "$revision" || true
-                            az containerapp revision delete \
-                              --name ${{ env.CONTAINER_APP_NAME }} \
-                              --resource-group ${{ env.RESOURCE_GROUP }} \
-                              --revision "$revision" --yes || true
                           fi
                         done
                         
@@ -236,14 +238,27 @@ jobs:
                           --revision-suffix "${NEW_DEV_REVISION}" \
                           --min-replicas 0 \
                           --max-replicas 5 \
-                          --environment-variables \
-                            RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                            STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
-                            PYTHONUNBUFFERED="1" \
-                          --secrets \
-                            "BOT_TOKEN=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                            "API_ID=api-id" \
-                            "API_HASH=api-hash"
+                          --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                          --set-env-vars STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
+                          --set-env-vars PYTHONUNBUFFERED="1" \
+                          --set-env-vars BOT_TOKEN="@Microsoft.KeyVault(SecretUri=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }})" \
+                          --set-env-vars API_ID="@Microsoft.KeyVault(SecretUri=api-id)" \
+                          --set-env-vars API_HASH="@Microsoft.KeyVault(SecretUri=api-hash)"
+      
+                        # After successful creation, clean up old revisions
+                        echo "Cleaning up old revisions..."
+                        az containerapp revision list \
+                          -n ${{ env.CONTAINER_APP_NAME }} \
+                          -g ${{ env.RESOURCE_GROUP }} \
+                          --query "[?properties.active==false].name" -o tsv | while read -r old_revision; do
+                          if [ -n "$old_revision" ]; then
+                            echo "Deactivating inactive revision: $old_revision"
+                            az containerapp revision deactivate \
+                              --name ${{ env.CONTAINER_APP_NAME }} \
+                              --resource-group ${{ env.RESOURCE_GROUP }} \
+                              --revision "$old_revision" || true
+                          fi
+                        done
                       fi
       
       - name: Verify Deployment
