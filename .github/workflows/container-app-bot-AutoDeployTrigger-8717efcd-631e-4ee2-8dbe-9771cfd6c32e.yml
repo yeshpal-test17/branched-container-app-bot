@@ -141,7 +141,6 @@ jobs:
               
       - name: Manage Container App Revisions
         run: |
-
                 echo "Getting current revision information..."
                 
                 # Get all revisions
@@ -159,7 +158,7 @@ jobs:
                   # Get current timestamp for new prod revision
                   TIMESTAMP=$(date +%Y%m%d%H%M%S)
                   NEW_PROD_REVISION="prod-${TIMESTAMP}"
-
+      
                   # First, deactivate existing revisions
                   echo "Deactivating existing revisions..."
                   az containerapp revision list \
@@ -174,18 +173,6 @@ jobs:
                         --revision "$revision" || true
                     fi
                   done
-
-                  # Create JSON for environment variables
-                  cat > env.json << EOF
-                  {
-                    "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
-                    "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
-                    "PYTHONUNBUFFERED": "1",
-                    "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
-                    "API_ID": "secretref:api-id",
-                    "API_HASH": "secretref:api-hash"
-                  }
-                  EOF
                   
                   # Create new prod revision
                   echo "Creating new prod revision: ${NEW_PROD_REVISION}"
@@ -197,7 +184,7 @@ jobs:
                     --revision-suffix "${NEW_PROD_REVISION}" \
                     --min-replicas 1 \
                     --max-replicas 10 \
-                    --set-env-vars "@env.json"
+                    --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" PYTHONUNBUFFERED=1 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} API_ID=secretref:api-id API_HASH=secretref:api-hash
                 
                 else
                   echo "Managing DEV revision..."
@@ -205,7 +192,7 @@ jobs:
                   # Get timestamp for new dev revision
                   TIMESTAMP=$(date +%Y%m%d%H%M%S)
                   NEW_DEV_REVISION="dev-${TIMESTAMP}"
-
+      
                   # First, deactivate existing revisions
                   echo "Deactivating existing revisions..."
                   az containerapp revision list \
@@ -220,18 +207,6 @@ jobs:
                         --revision "$revision" || true
                     fi
                   done
-
-                  # Create JSON for environment variables
-                  cat > env.json << EOF
-                  {
-                    "RELEASE_TAG": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}",
-                    "STAGE": "${{ steps.set_deployment_info.outputs.STAGE }}",
-                    "PYTHONUNBUFFERED": "1",
-                    "BOT_TOKEN": "secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}",
-                    "API_ID": "secretref:api-id",
-                    "API_HASH": "secretref:api-hash"
-                  }
-                  EOF
                   
                   # Create new dev revision
                   echo "Creating new dev revision: ${NEW_DEV_REVISION}"
@@ -243,7 +218,7 @@ jobs:
                     --revision-suffix "${NEW_DEV_REVISION}" \
                     --min-replicas 0 \
                     --max-replicas 5 \
-                    --set-env-vars "@env.json"
+                    --set-env-vars RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" PYTHONUNBUFFERED=1 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} API_ID=secretref:api-id API_HASH=secretref:api-hash
                 fi
       
       - name: Verify Deployment
