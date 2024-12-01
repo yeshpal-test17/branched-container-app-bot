@@ -26,10 +26,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.AZURE_CREDENTIALS }}
+
           
       - name: Set deployment info
         id: set_deployment_info
@@ -230,3 +232,6 @@ jobs:
               fi
             done
           fi
+
+
+          AZURE_CREDENTIALS_m21-live
