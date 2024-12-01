@@ -160,7 +160,9 @@ jobs:
         run: |
               # Get timestamp for new revision
               TIMESTAMP=$(date +%Y%m%d%H%M%S)
-              NEW_REVISION="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+              # Make revision name lowercase and start with alphabet
+              NEW_REVISION="rev-${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+              NEW_REVISION=$(echo $NEW_REVISION | tr '[:upper:]' '[:lower:]')
               
               if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                 # Production container app configuration
@@ -200,10 +202,13 @@ jobs:
                 sleep 30
                 
                 # Check if new revision is healthy
+                # Get the full revision name including the container app name prefix
+                FULL_REVISION_NAME="${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }}--${NEW_REVISION}"
+                
                 REVISION_STATUS=$(az containerapp revision show \
                   -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                   -g ${{ env.RESOURCE_GROUP }} \
-                  --revision ${NEW_REVISION} \
+                  --revision ${FULL_REVISION_NAME} \
                   --query "properties.status" -o tsv)
                   
                 if [ "$REVISION_STATUS" == "Running" ]; then
@@ -213,7 +218,7 @@ jobs:
                   az containerapp ingress traffic set \
                     --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                     --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision-weight ${NEW_REVISION}=100
+                    --revision-weight ${FULL_REVISION_NAME}=100
                     
                   echo "Traffic switched to new revision"
                   
@@ -253,7 +258,7 @@ jobs:
                 fi
                 
               else
-                # Development container app configuration (unchanged)
+                # Development container app configuration
                 API_ID_SECRET="api-id"
                 API_HASH_SECRET="api-hash"
                 BOT_TOKEN_SECRET="${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
@@ -294,3 +299,4 @@ jobs:
                   fi
                 done
               fi
+
