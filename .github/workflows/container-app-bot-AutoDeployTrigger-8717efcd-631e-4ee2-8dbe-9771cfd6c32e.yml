@@ -158,79 +158,88 @@ jobs:
 
       - name: Manage Container App Revisions
         run: |
-          # Get all revisions
-          ALL_REVISIONS=$(az containerapp revision list \
-            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            -g ${{ env.RESOURCE_GROUP }} \
-            --query "[].{name:name, active:properties.active, createdTime:properties.createdTime}" -o json)
-          
-          # Get timestamp for new revision
-          TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          NEW_REVISION="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
-          
-          # Determine secret references based on the container app
-          if [ "${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }}" == "${{ env.PROD_CONTAINER_APP_NAME }}" ]; then
-            API_ID_SECRET="apiid"
-            API_HASH_SECRET="apihash"
-            BOT_TOKEN_SECRET="bottokern"
-          else
-            API_ID_SECRET="api-id"
-            API_HASH_SECRET="api-hash"
-            BOT_TOKEN_SECRET="${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
-          fi
-
-          # Update Container App
-          echo "Creating new revision: ${NEW_REVISION}"
-          az containerapp update \
-            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-            --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-            --revision-suffix "${NEW_REVISION}" \
-            --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-            --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-            --set-env-vars \
-              "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-              "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
-              "PYTHONUNBUFFERED=1" \
-              "BOT_TOKEN=secretref:${BOT_TOKEN_SECRET}" \
-              "API_ID=secretref:${API_ID_SECRET}" \
-              "API_HASH=secretref:${API_HASH_SECRET}"
-          
-          # Wait for new revision to be ready
-          sleep 30
-          
-          # Manage revisions
-          if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-            # For production, keep latest 2 revisions
-            az containerapp revision list \
-              -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              -g ${{ env.RESOURCE_GROUP }} \
-              --query "[?contains(name, '${{ steps.set_deployment_info.outputs.STAGE }}-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json | \
-              jq -r '.[:-2][].name' | while read -r old_revision; do
-              if [ -n "$old_revision" ]; then
-                echo "Deleting old revision: $old_revision"
-                az containerapp revision delete \
+              # Get timestamp for new revision
+              TIMESTAMP=$(date +%Y%m%d%H%M%S)
+              NEW_REVISION="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+              
+              # Determine secret references based on the container app
+              if [ "${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }}" == "${{ env.PROD_CONTAINER_APP_NAME }}" ]; then
+                # Production container app configuration (single container)
+                API_ID_SECRET="apiid"
+                API_HASH_SECRET="apihash"
+                BOT_TOKEN_SECRET="bottokern"
+                
+                # Update production container app with single container
+                echo "Creating new revision for production: ${NEW_REVISION}"
+                az containerapp update \
                   --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                   --resource-group ${{ env.RESOURCE_GROUP }} \
-                  --revision "$old_revision" --yes || true
-              fi
-            done
-          else
-            # For non-production, keep latest 3 revisions
-            az containerapp revision list \
-              -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              -g ${{ env.RESOURCE_GROUP }} \
-              --query "[?contains(name, '${{ steps.set_deployment_info.outputs.STAGE }}-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json | \
-              jq -r '.[:-3][].name' | while read -r old_revision; do
-              if [ -n "$old_revision" ]; then
-                echo "Deleting old revision: $old_revision"
-                az containerapp revision delete \
+                  --revision-suffix "${NEW_REVISION}" \
+                  --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+                  --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                  --container-name container-app-bot-prod \
+                  --image ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                  --cpu 0.5 --memory 1.0Gi \
+                  --set-env-vars \
+                    "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                    "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                    "PYTHONUNBUFFERED=1" \
+                    "BOT_TOKEN=secretref:${BOT_TOKEN_SECRET}" \
+                    "API_ID=secretref:${API_ID_SECRET}" \
+                    "API_HASH=secretref:${API_HASH_SECRET}"
+              else
+                # Development container app configuration (three containers)
+                API_ID_SECRET="api-id"
+                API_HASH_SECRET="api-hash"
+                BOT_TOKEN_SECRET="${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
+                
+                # Update development container app with all three containers
+                echo "Creating new revision for development: ${NEW_REVISION}"
+                az containerapp update \
                   --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                   --resource-group ${{ env.RESOURCE_GROUP }} \
-                  --revision "$old_revision" --yes || true
+                  --revision-suffix "${NEW_REVISION}" \
+                  --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+                  --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                  --containers \
+                    "name=container-app-bot-dev,image=${{ env.ACR_NAME }}.azurecr.io/container-app-bot-dev:dev-latest,cpu=0.5,memory=1.0Gi,env=[{name=RELEASE_TAG,value=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}},{name=STAGE,value=dev},{name=PYTHONUNBUFFERED,value=1},{name=BOT_TOKEN,secretRef=dev-bot-token},{name=API_ID,secretRef=$API_ID_SECRET},{name=API_HASH,secretRef=$API_HASH_SECRET}]" \
+                    "name=container-app-bot-test,image=${{ env.ACR_NAME }}.azurecr.io/container-app-bot-test:test-latest,cpu=0.5,memory=1.0Gi,env=[{name=RELEASE_TAG,value=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}},{name=STAGE,value=test},{name=PYTHONUNBUFFERED,value=1},{name=BOT_TOKEN,secretRef=test-bot-token},{name=API_ID,secretRef=$API_ID_SECRET},{name=API_HASH,secretRef=$API_HASH_SECRET}]" \
+                    "name=container-app-bot-staging,image=${{ env.ACR_NAME }}.azurecr.io/container-app-bot-staging:staging-latest,cpu=0.5,memory=1.0Gi,env=[{name=RELEASE_TAG,value=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}},{name=STAGE,value=staging},{name=PYTHONUNBUFFERED,value=1},{name=BOT_TOKEN,secretRef=master-bot-token},{name=API_ID,secretRef=$API_ID_SECRET},{name=API_HASH,secretRef=$API_HASH_SECRET}]"
               fi
-            done
-          fi
-
+              
+              # Wait for new revision to be ready
+              sleep 30
+              
+              # Manage revisions
+              if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+                # For production, keep latest 2 revisions
+                az containerapp revision list \
+                  -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  -g ${{ env.RESOURCE_GROUP }} \
+                  --query "[?contains(name, '${{ steps.set_deployment_info.outputs.STAGE }}-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json | \
+                  jq -r '.[:-2][].name' | while read -r old_revision; do
+                  if [ -n "$old_revision" ]; then
+                    echo "Deleting old revision: $old_revision"
+                    az containerapp revision delete \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$old_revision" --yes || true
+                  fi
+                done
+              else
+                # For non-production, keep latest 3 revisions
+                az containerapp revision list \
+                  -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  -g ${{ env.RESOURCE_GROUP }} \
+                  --query "[?contains(name, '${{ steps.set_deployment_info.outputs.STAGE }}-')].{name:name, createdTime:properties.createdTime} | sort_by(@, &createdTime)" -o json | \
+                  jq -r '.[:-3][].name' | while read -r old_revision; do
+                  if [ -n "$old_revision" ]; then
+                    echo "Deleting old revision: $old_revision"
+                    az containerapp revision delete \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$old_revision" --yes || true
+                  fi
+                done
+              fi
 
