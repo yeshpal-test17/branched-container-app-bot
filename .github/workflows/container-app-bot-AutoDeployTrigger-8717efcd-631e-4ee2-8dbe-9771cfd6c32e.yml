@@ -176,7 +176,7 @@ jobs:
                 
                 echo "Current active revision: $CURRENT_REVISION"
                 
-                # Create new revision with 0 traffic
+                # Create new revision
                 echo "Creating new revision: ${NEW_REVISION}"
                 az containerapp update \
                   --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
@@ -185,7 +185,7 @@ jobs:
                   --container-name container-app-bot-prod \
                   --image ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                   --cpu 0.5 --memory 1.0Gi \
-                  --min-replicas 1 \
+                  --min-replicas 0 \
                   --max-replicas 10 \
                   --set-env-vars \
                     "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
@@ -193,8 +193,7 @@ jobs:
                     "PYTHONUNBUFFERED=1" \
                     "BOT_TOKEN=secretref:${BOT_TOKEN_SECRET}" \
                     "API_ID=secretref:${API_ID_SECRET}" \
-                    "API_HASH=secretref:${API_HASH_SECRET}" \
-                  --traffic-weight ${NEW_REVISION}=0
+                    "API_HASH=secretref:${API_HASH_SECRET}"
     
                 # Wait for new revision to be ready
                 echo "Waiting for new revision to be ready..."
@@ -208,15 +207,21 @@ jobs:
                   --query "properties.status" -o tsv)
                   
                 if [ "$REVISION_STATUS" == "Running" ]; then
-                  echo "New revision is healthy. Switching traffic..."
+                  echo "New revision is healthy. Updating traffic rules..."
                   
-                  # Switch traffic to new revision
-                  az containerapp revision activate \
+                  # Update traffic rules to direct all traffic to new revision
+                  az containerapp ingress traffic set \
                     --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                     --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision ${NEW_REVISION}
+                    --revision-weight ${NEW_REVISION}=100
                     
                   echo "Traffic switched to new revision"
+                  
+                  # Once traffic is switched, increase min replicas for the new active revision
+                  az containerapp update \
+                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --min-replicas 1
                   
                   # Deactivate old revision
                   if [ -n "$CURRENT_REVISION" ]; then
@@ -248,7 +253,7 @@ jobs:
                 fi
                 
               else
-                # Development container app configuration
+                # Development container app configuration (unchanged)
                 API_ID_SECRET="api-id"
                 API_HASH_SECRET="api-hash"
                 BOT_TOKEN_SECRET="${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}"
@@ -289,4 +294,3 @@ jobs:
                   fi
                 done
               fi
-
