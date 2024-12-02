@@ -31,6 +31,61 @@ jobs:
         with:
           creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.AZURE_CREDENTIALS }}
 
+
+
+
+      - name: Cleanup Existing Revisions
+        run: |
+            echo "Starting cleanup of container app revisions..."
+            
+            # Function to cleanup revisions for a container app
+            cleanup_container_app() {
+              local app_name=$1
+              echo "Cleaning up revisions for container app: $app_name"
+              
+              # List all revisions
+              REVISIONS=$(az containerapp revision list \
+                -n "$app_name" \
+                -g ${{ env.RESOURCE_GROUP }} \
+                --query "[].name" -o tsv)
+                
+              if [ -n "$REVISIONS" ]; then
+                echo "Found revisions to clean up:"
+                echo "$REVISIONS"
+                
+                # Deactivate and delete each revision
+                echo "$REVISIONS" | while read -r revision; do
+                  if [ -n "$revision" ]; then
+                    echo "Processing revision: $revision"
+                    
+                    # Try to deactivate first
+                    echo "Attempting to deactivate revision: $revision"
+                    az containerapp revision deactivate \
+                      --name "$app_name" \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$revision" || true
+                      
+                    # Then delete the revision
+                    echo "Deleting revision: $revision"
+                    az containerapp revision delete \
+                      --name "$app_name" \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$revision" --yes || true
+                  fi
+                done
+              else
+                echo "No revisions found for $app_name"
+              fi
+            }
+            
+            # Clean up both container apps
+            cleanup_container_app "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
+            cleanup_container_app "${{ env.PROD_CONTAINER_APP_NAME }}"
+            
+            echo "Cleanup completed. Waiting 30 seconds before proceeding..."
+            sleep 30
+
+
       - name: Set deployment info
         id: set_deployment_info
         run: |
