@@ -31,7 +31,51 @@ jobs:
         with:
           creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.AZURE_CREDENTIALS }}
 
-          
+      - name: Cleanup Active Revisions
+        run: |
+            echo "Starting cleanup of active revisions..."
+            
+            # Function to deactivate all active revisions for a container app
+            deactivate_all_active_revisions() {
+              local app_name=$1
+              echo "Processing container app: $app_name"
+              
+              # List all active revisions
+              ACTIVE_REVISIONS=$(az containerapp revision list \
+                -n "$app_name" \
+                -g ${{ env.RESOURCE_GROUP }} \
+                --query "[?properties.active].name" -o tsv)
+              
+              if [ -n "$ACTIVE_REVISIONS" ]; then
+                echo "Found active revisions:"
+                echo "$ACTIVE_REVISIONS"
+                
+                while IFS= read -r revision; do
+                  if [ -n "$revision" ]; then
+                    echo "Deactivating revision: $revision"
+                    az containerapp revision deactivate \
+                      --name "$app_name" \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$revision"
+                  fi
+                done <<< "$ACTIVE_REVISIONS"
+              else
+                echo "No active revisions found for $app_name"
+              fi
+            }
+            
+            # Only cleanup the relevant container app based on branch
+            if [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+              echo "Cleaning m21-live..."
+              deactivate_all_active_revisions "${{ env.PROD_CONTAINER_APP_NAME }}"
+            else
+              echo "Cleaning branched-container-app-bot..."
+              deactivate_all_active_revisions "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
+            fi
+            
+            echo "Cleanup completed. Waiting 60 seconds before proceeding..."
+            sleep 60
+
       - name: Set deployment info
         id: set_deployment_info
         run: |
@@ -98,7 +142,7 @@ jobs:
             "refs/heads/prod")
               echo "STAGE=prod" >> $GITHUB_OUTPUT
               echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
-              echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=bottokern" >> $GITHUB_OUTPUT
               echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
               echo "IS_PROD=true" >> $GITHUB_OUTPUT
               echo "CONTAINER_APP_NAME=${{ env.PROD_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
@@ -135,87 +179,77 @@ jobs:
             --file Dockerfile \
             .
 
-      - name: Manage Container App Revisions
+      - name: Deploy Container App
         run: |
-              # Get timestamp for new revision
-              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-              
-              if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-                echo "Managing PROD container app (m21-live)..."
-                REVISION_SUFFIX="prod-${TIMESTAMP}"
-                
-                az containerapp update \
-                  --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                  --resource-group ${{ env.RESOURCE_GROUP }} \
-                  --revision-suffix "${REVISION_SUFFIX}" \
-                  --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-                  --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                  --container-name container-app-bot-prod \
-                  --image ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                  --cpu 0.5 --memory 1.0Gi \
-                  --set-env-vars \
-                    "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                    "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
-                    "PYTHONUNBUFFERED=1" \
-                    "BOT_TOKEN=secretref:bottokern" \
-                    "API_ID=secretref:apiid" \
-                    "API_HASH=secretref:apihash"
-              else
-                echo "Managing DEV container app (branched-container-app-bot)..."
-                REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
-                
-                # Use the same format as production for non-prod deployments
-                az containerapp update \
-                  --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                  --resource-group ${{ env.RESOURCE_GROUP }} \
-                  --revision-suffix "${REVISION_SUFFIX}" \
-                  --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-                  --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                  --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                  --cpu 0.5 --memory 1.0Gi \
-                  --set-env-vars \
-                    "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                    "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
-                    "PYTHONUNBUFFERED=1" \
-                    "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                    "API_ID=secretref:api-id" \
-                    "API_HASH=secretref:api-hash"
-              fi
-    
+          # Get timestamp for new revision
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+          
+          # Get the current container app config
+          CURRENT_CONFIG=$(az containerapp show \
+            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }})
+          
+          # Create the new container configuration
+          CONTAINER_CONFIG="{
+            \"name\": \"${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}\",
+            \"image\": \"${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }}\",
+            \"resources\": {
+              \"cpu\": 0.5,
+              \"memory\": \"1.0Gi\"
+            },
+            \"env\": [
+              {\"name\": \"RELEASE_TAG\", \"value\": \"${{ steps.set_deployment_info.outputs.RELEASE_TAG }}\"},
+              {\"name\": \"STAGE\", \"value\": \"${{ steps.set_deployment_info.outputs.STAGE }}\"},
+              {\"name\": \"PYTHONUNBUFFERED\", \"value\": \"1\"},
+              {\"name\": \"BOT_TOKEN\", \"secretRef\": \"${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}\"},
+              {\"name\": \"API_ID\", \"secretRef\": \"${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }}\"},
+              {\"name\": \"API_HASH\", \"secretRef\": \"${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}\"}
+            ]
+          }"
+          
+          # Update the container app with single container
+          az containerapp update \
+            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --revision-suffix "${REVISION_SUFFIX}" \
+            --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+            --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+            --containers "$CONTAINER_CONFIG"
+
       - name: Verify Deployment
         run: |
-              echo "Verifying deployment..."
-              
-              # Wait for deployment to stabilize
-              sleep 90
-              
-              # Get current active revisions
-              ACTIVE_REVISIONS=$(az containerapp revision list \
-                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
-              
-              echo "Current active revisions:"
-              echo "$ACTIVE_REVISIONS" | jq '.'
-              
-              # Define expected values
-              EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-              SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'prod-' || steps.set_deployment_info.outputs.STAGE }}-"
-              
-              echo "Looking for revision with pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
-              
-              # Verify deployment
-              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
-                echo "✅ Deployment verified successfully"
-                echo "Active revision details:"
-                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
-              else
-                echo "❌ Deployment verification failed"
-                echo "Debug information:"
-                echo "Expected container name: $EXPECTED_CONTAINER"
-                echo "Expected suffix pattern: $SUFFIX_PATTERN"
-                echo "All active revisions:"
-                echo "$ACTIVE_REVISIONS" | jq '.'
-                exit 1
-              fi
+          echo "Verifying deployment..."
+          
+          # Wait for deployment to stabilize
+          sleep 90
+          
+          # Get current active revisions
+          ACTIVE_REVISIONS=$(az containerapp revision list \
+            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
+          
+          echo "Current active revisions:"
+          echo "$ACTIVE_REVISIONS" | jq '.'
+          
+          # Define expected values
+          EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+          SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.STAGE }}-"
+          
+          echo "Looking for revision with pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
+          
+          # Verify deployment
+          if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
+            echo "✅ Deployment verified successfully"
+            echo "Active revision details:"
+            echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
+          else
+            echo "❌ Deployment verification failed"
+            echo "Debug information:"
+            echo "Expected container name: $EXPECTED_CONTAINER"
+            echo "Expected suffix pattern: $SUFFIX_PATTERN"
+            echo "All active revisions:"
+            echo "$ACTIVE_REVISIONS" | jq '.'
+            exit 1
+          fi
