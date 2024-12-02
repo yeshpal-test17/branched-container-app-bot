@@ -31,236 +31,191 @@ jobs:
         with:
           creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.AZURE_CREDENTIALS }}
 
-
-
-
-      - name: Cleanup Active Revisions
+          
+      - name: Set deployment info
+        id: set_deployment_info
         run: |
-            echo "Starting cleanup of active revisions..."
+          # For releases, use the target branch and validate tag format
+          if [ "${{ github.event_name }}" == "release" ]; then
+            BRANCH_REF="refs/heads/${{ github.event.release.target_commitish }}"
+            TAG_NAME="${{ github.event.release.tag_name }}"
             
-            # Function to deactivate all active revisions for a container app
-            deactivate_all_active_revisions() {
-              local app_name=$1
-              echo "Processing container app: $app_name"
-              
-              # List all active revisions
-              ACTIVE_REVISIONS=$(az containerapp revision list \
-                -n "$app_name" \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].name" -o tsv)
-              
-              if [ -n "$ACTIVE_REVISIONS" ]; then
-                echo "Found active revisions:"
-                echo "$ACTIVE_REVISIONS"
-                
-                while IFS= read -r revision; do
-                  if [ -n "$revision" ]; then
-                    echo "Deactivating revision: $revision"
-                    az containerapp revision deactivate \
-                      --name "$app_name" \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision"
-                  fi
-                done <<< "$ACTIVE_REVISIONS"
-              else
-                echo "No active revisions found for $app_name"
+            # Validate tag format based on branch
+            if [[ "$BRANCH_REF" == "refs/heads/develop" ]]; then
+              if [[ ! "$TAG_NAME" =~ ^alpha-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Error: Invalid tag format for develop branch. Must be 'alpha-x.y.z'"
+                exit 1
               fi
-            }
-            
-            # Cleanup both container apps
-            echo "Cleaning branched-container-app-bot..."
-            deactivate_all_active_revisions "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
-            
-            echo "Cleaning m21-live..."
-            deactivate_all_active_revisions "${{ env.PROD_CONTAINER_APP_NAME }}"
-            
-            echo "Cleanup completed. Waiting 60 seconds before proceeding..."
-            sleep 60
+              echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
+              echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+            elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
+              if [[ ! "$TAG_NAME" =~ ^beta-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Error: Invalid tag format for test branch. Must be 'beta-x.y.z'"
+                exit 1
+              fi
+              echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
+              echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+            else
+              echo "Error: Releases are only allowed from develop or test branches."
+              exit 1
+            fi
+          else
+            BRANCH_REF="${{ github.ref }}"
+          fi
 
-      # - name: Set deployment info
-      #   id: set_deployment_info
-      #   run: |
-      #     # For releases, use the target branch and validate tag format
-      #     if [ "${{ github.event_name }}" == "release" ]; then
-      #       BRANCH_REF="refs/heads/${{ github.event.release.target_commitish }}"
-      #       TAG_NAME="${{ github.event.release.tag_name }}"
-            
-      #       # Validate tag format based on branch
-      #       if [[ "$BRANCH_REF" == "refs/heads/develop" ]]; then
-      #         if [[ ! "$TAG_NAME" =~ ^alpha-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      #           echo "Error: Invalid tag format for develop branch. Must be 'alpha-x.y.z'"
-      #           exit 1
-      #         fi
-      #         echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-      #       elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
-      #         if [[ ! "$TAG_NAME" =~ ^beta-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      #           echo "Error: Invalid tag format for test branch. Must be 'beta-x.y.z'"
-      #           exit 1
-      #         fi
-      #         echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-      #       else
-      #         echo "Error: Releases are only allowed from develop or test branches."
-      #         exit 1
-      #       fi
-      #     else
-      #       BRANCH_REF="${{ github.ref }}"
-      #     fi
+          # Set environment variables based on branch
+          case "$BRANCH_REF" in
+            "refs/heads/develop")
+              echo "STAGE=dev" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
+              echo "IS_PROD=false" >> $GITHUB_OUTPUT
+              echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+              echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/test")
+              echo "STAGE=test" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=test-latest" >> $GITHUB_OUTPUT
+              echo "IS_PROD=false" >> $GITHUB_OUTPUT
+              echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+              echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/master")
+              echo "STAGE=staging" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
+              echo "IS_PROD=false" >> $GITHUB_OUTPUT
+              echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+              echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
+              ;;
+            "refs/heads/prod")
+              echo "STAGE=prod" >> $GITHUB_OUTPUT
+              echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
+              echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
+              echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
+              echo "IS_PROD=true" >> $GITHUB_OUTPUT
+              echo "CONTAINER_APP_NAME=${{ env.PROD_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=1" >> $GITHUB_OUTPUT
+              echo "MAX_REPLICAS=10" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "Error: Unsupported branch" >> $GITHUB_OUTPUT
+              exit 1
+              ;;
+          esac
 
-      #     # Set environment variables based on branch
-      #     case "$BRANCH_REF" in
-      #       "refs/heads/develop")
-      #         echo "STAGE=dev" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
-      #         echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
-      #         echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
-      #         echo "IS_PROD=false" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-      #         echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
-      #         echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
-      #         ;;
-      #       "refs/heads/test")
-      #         echo "STAGE=test" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
-      #         echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
-      #         echo "IMAGE_TAG=test-latest" >> $GITHUB_OUTPUT
-      #         echo "IS_PROD=false" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-      #         echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
-      #         echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
-      #         ;;
-      #       "refs/heads/master")
-      #         echo "STAGE=staging" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
-      #         echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
-      #         echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
-      #         echo "IS_PROD=false" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-      #         echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
-      #         echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
-      #         ;;
-      #       "refs/heads/prod")
-      #         echo "STAGE=prod" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
-      #         echo "BOT_TOKEN_SECRET=prod-bot-token" >> $GITHUB_OUTPUT
-      #         echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
-      #         echo "IS_PROD=true" >> $GITHUB_OUTPUT
-      #         echo "CONTAINER_APP_NAME=${{ env.PROD_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-      #         echo "MIN_REPLICAS=1" >> $GITHUB_OUTPUT
-      #         echo "MAX_REPLICAS=10" >> $GITHUB_OUTPUT
-      #         ;;
-      #       *)
-      #         echo "Error: Unsupported branch" >> $GITHUB_OUTPUT
-      #         exit 1
-      #         ;;
-      #     esac
+          # Set release tag for other events
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "RELEASE_TAG=merged-into-${{ github.base.ref }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" != "release" ]; then
+            echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
+          fi
 
-      #     # Set release tag for other events
-      #     if [ "${{ github.event_name }}" == "push" ]; then
-      #       echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
-      #     elif [ "${{ github.event_name }}" == "pull_request" ]; then
-      #       echo "RELEASE_TAG=merged-into-${{ github.base.ref }}" >> $GITHUB_OUTPUT
-      #     elif [ "${{ github.event_name }}" != "release" ]; then
-      #       echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
-      #     fi
+      - name: Build and push image to ACR
+        run: |
+          # Clean up old images with the same tag
+          az acr repository delete \
+            --name ${{ env.ACR_NAME }} \
+            --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+            --yes || true
 
-      # - name: Build and push image to ACR
-      #   run: |
-      #     # Clean up old images with the same tag
-      #     az acr repository delete \
-      #       --name ${{ env.ACR_NAME }} \
-      #       --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-      #       --yes || true
+          # Build and push new image
+          az acr build \
+            --registry ${{ env.ACR_NAME }} \
+            --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+            --file Dockerfile \
+            .
 
-      #     # Build and push new image
-      #     az acr build \
-      #       --registry ${{ env.ACR_NAME }} \
-      #       --image ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-      #       --file Dockerfile \
-      #       .
-
-      # - name: Manage Container App Revisions
-      #   run: |
-      #         # Get timestamp for new revision
-      #         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+      - name: Manage Container App Revisions
+        run: |
+              # Get timestamp for new revision
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
               
-      #         if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-      #           echo "Managing PROD container app (m21-live)..."
-      #           REVISION_SUFFIX="prod-${TIMESTAMP}"
+              if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
+                echo "Managing PROD container app (m21-live)..."
+                REVISION_SUFFIX="prod-${TIMESTAMP}"
                 
-      #           az containerapp update \
-      #             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-      #             --resource-group ${{ env.RESOURCE_GROUP }} \
-      #             --revision-suffix "${REVISION_SUFFIX}" \
-      #             --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-      #             --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-      #             --container-name container-app-bot-prod \
-      #             --image ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-      #             --cpu 0.5 --memory 1.0Gi \
-      #             --set-env-vars \
-      #               "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-      #               "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
-      #               "PYTHONUNBUFFERED=1" \
-      #               "BOT_TOKEN=secretref:bottokern" \
-      #               "API_ID=secretref:apiid" \
-      #               "API_HASH=secretref:apihash"
-      #         else
-      #           echo "Managing DEV container app (branched-container-app-bot)..."
-      #           REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+                az containerapp update \
+                  --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ env.RESOURCE_GROUP }} \
+                  --revision-suffix "${REVISION_SUFFIX}" \
+                  --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+                  --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                  --container-name container-app-bot-prod \
+                  --image ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-prod:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                  --cpu 0.5 --memory 1.0Gi \
+                  --set-env-vars \
+                    "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                    "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                    "PYTHONUNBUFFERED=1" \
+                    "BOT_TOKEN=secretref:bottokern" \
+                    "API_ID=secretref:apiid" \
+                    "API_HASH=secretref:apihash"
+              else
+                echo "Managing DEV container app (branched-container-app-bot)..."
+                REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
                 
-      #           # Use the same format as production for non-prod deployments
-      #           az containerapp update \
-      #             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-      #             --resource-group ${{ env.RESOURCE_GROUP }} \
-      #             --revision-suffix "${REVISION_SUFFIX}" \
-      #             --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-      #             --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-      #             --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-      #             --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-      #             --cpu 0.5 --memory 1.0Gi \
-      #             --set-env-vars \
-      #               "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-      #               "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
-      #               "PYTHONUNBUFFERED=1" \
-      #               "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-      #               "API_ID=secretref:api-id" \
-      #               "API_HASH=secretref:api-hash"
-      #         fi
+                # Use the same format as production for non-prod deployments
+                az containerapp update \
+                  --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ env.RESOURCE_GROUP }} \
+                  --revision-suffix "${REVISION_SUFFIX}" \
+                  --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+                  --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                  --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                  --cpu 0.5 --memory 1.0Gi \
+                  --set-env-vars \
+                    "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                    "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                    "PYTHONUNBUFFERED=1" \
+                    "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                    "API_ID=secretref:api-id" \
+                    "API_HASH=secretref:api-hash"
+              fi
     
-      # - name: Verify Deployment
-      #   run: |
-      #         echo "Verifying deployment..."
+      - name: Verify Deployment
+        run: |
+              echo "Verifying deployment..."
               
-      #         # Wait for deployment to stabilize
-      #         sleep 90
+              # Wait for deployment to stabilize
+              sleep 90
               
-      #         # Get current active revisions
-      #         ACTIVE_REVISIONS=$(az containerapp revision list \
-      #           -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-      #           -g ${{ env.RESOURCE_GROUP }} \
-      #           --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
+              # Get current active revisions
+              ACTIVE_REVISIONS=$(az containerapp revision list \
+                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                -g ${{ env.RESOURCE_GROUP }} \
+                --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
               
-      #         echo "Current active revisions:"
-      #         echo "$ACTIVE_REVISIONS" | jq '.'
+              echo "Current active revisions:"
+              echo "$ACTIVE_REVISIONS" | jq '.'
               
-      #         # Define expected values
-      #         EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-      #         SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'prod-' || steps.set_deployment_info.outputs.STAGE }}-"
+              # Define expected values
+              EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+              SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'prod-' || steps.set_deployment_info.outputs.STAGE }}-"
               
-      #         echo "Looking for revision with pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
+              echo "Looking for revision with pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
               
-      #         # Verify deployment
-      #         if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
-      #           echo "✅ Deployment verified successfully"
-      #           echo "Active revision details:"
-      #           echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
-      #         else
-      #           echo "❌ Deployment verification failed"
-      #           echo "Debug information:"
-      #           echo "Expected container name: $EXPECTED_CONTAINER"
-      #           echo "Expected suffix pattern: $SUFFIX_PATTERN"
-      #           echo "All active revisions:"
-      #           echo "$ACTIVE_REVISIONS" | jq '.'
-      #           exit 1
-      #         fi
+              # Verify deployment
+              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
+                echo "✅ Deployment verified successfully"
+                echo "Active revision details:"
+                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
+              else
+                echo "❌ Deployment verification failed"
+                echo "Debug information:"
+                echo "Expected container name: $EXPECTED_CONTAINER"
+                echo "Expected suffix pattern: $SUFFIX_PATTERN"
+                echo "All active revisions:"
+                echo "$ACTIVE_REVISIONS" | jq '.'
+                exit 1
+              fi
