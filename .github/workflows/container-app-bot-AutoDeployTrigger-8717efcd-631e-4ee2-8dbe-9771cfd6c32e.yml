@@ -209,21 +209,30 @@ jobs:
                 echo "Managing DEV container app (branched-container-app-bot)..."
                 REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
                 
-                # Deploy new revision using containers array format
+                # Use the same format as production for non-prod deployments
                 az containerapp update \
                   --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                   --resource-group ${{ env.RESOURCE_GROUP }} \
                   --revision-suffix "${REVISION_SUFFIX}" \
                   --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
                   --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                  --containers "name=${{ steps.set_deployment_info.outputs.CONTAINER_NAME }},image=${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }},cpu=0.5,memory=1.0Gi,env=[{name=RELEASE_TAG,value=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}},{name=STAGE,value=${{ steps.set_deployment_info.outputs.STAGE }}},{name=PYTHONUNBUFFERED,value=1},{name=BOT_TOKEN,secretRef=${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}},{name=API_ID,secretRef=api-id},{name=API_HASH,secretRef=api-hash}]"
+                  --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+                  --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                  --cpu 0.5 --memory 1.0Gi \
+                  --set-env-vars \
+                    "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                    "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                    "PYTHONUNBUFFERED=1" \
+                    "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                    "API_ID=secretref:api-id" \
+                    "API_HASH=secretref:api-hash"
               fi
     
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
               
-              # Increase wait time for deployment stabilization
+              # Wait for deployment to stabilize
               sleep 90
               
               # Get current active revisions
