@@ -53,24 +53,14 @@ jobs:
                 echo "Found revisions to clean up:"
                 echo "$REVISIONS"
                 
-                # Deactivate and delete each revision
+                # Deactivate each revision
                 echo "$REVISIONS" | while read -r revision; do
                   if [ -n "$revision" ]; then
-                    echo "Processing revision: $revision"
-                    
-                    # Try to deactivate first
-                    echo "Attempting to deactivate revision: $revision"
+                    echo "Deactivating revision: $revision"
                     az containerapp revision deactivate \
                       --name "$app_name" \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
                       --revision "$revision" || true
-                      
-                    # Then delete the revision
-                    echo "Deleting revision: $revision"
-                    az containerapp revision delete \
-                      --name "$app_name" \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision" --yes || true
                   fi
                 done
               else
@@ -78,9 +68,12 @@ jobs:
               fi
             }
             
-            # Clean up both container apps
-            cleanup_container_app "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
-            cleanup_container_app "${{ env.PROD_CONTAINER_APP_NAME }}"
+            # Clean up branched container app only if not prod deployment
+            if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
+              cleanup_container_app "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
+            else
+              cleanup_container_app "${{ env.PROD_CONTAINER_APP_NAME }}"
+            fi
             
             echo "Cleanup completed. Waiting 30 seconds before proceeding..."
             sleep 30
