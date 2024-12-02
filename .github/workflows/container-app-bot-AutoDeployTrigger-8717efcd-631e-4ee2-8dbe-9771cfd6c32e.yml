@@ -15,7 +15,7 @@ permissions:
 env:
   ACR_NAME: ca20a502fbd8acr
   RESOURCE_GROUP: container-app-rsgp
-  BRANCHED_CONTAINER_APP_NAME: branched-container-app-bot
+  BRANCHED_CONTAINER_APP_NAME: m21-development
   PROD_CONTAINER_APP_NAME: m21-live
 
 jobs:
@@ -73,8 +73,8 @@ jobs:
               deactivate_all_active_revisions "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
             fi
             
-            echo "Cleanup completed. Waiting 60 seconds before proceeding..."
-            sleep 60
+            echo "Cleanup completed. Waiting 30 seconds before proceeding..."
+            sleep 30
 
       - name: Set deployment info
         id: set_deployment_info
@@ -185,33 +185,42 @@ jobs:
               TIMESTAMP=$(date +%Y%m%d-%H%M%S)
               REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
               
-              # First, delete the existing container app if it exists
-              echo "Deleting existing container app if it exists..."
-              az containerapp delete \
-                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --yes || true
-                
-              # Wait for deletion to complete
-              echo "Waiting for deletion to complete..."
+              echo "Deactivating existing revisions..."
+              # List all active revisions
+              ACTIVE_REVISIONS=$(az containerapp revision list \
+                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                -g ${{ env.RESOURCE_GROUP }} \
+                --query "[?properties.active].name" -o tsv)
+              
+              # Deactivate each revision
+              if [ -n "$ACTIVE_REVISIONS" ]; then
+                while IFS= read -r revision; do
+                  if [ -n "$revision" ]; then
+                    echo "Deactivating revision: $revision"
+                    az containerapp revision deactivate \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$revision"
+                  fi
+                done <<< "$ACTIVE_REVISIONS"
+              fi
+              
+              # Wait for deactivation to complete
+              echo "Waiting for deactivation to complete..."
               sleep 30
               
-              # Create the new container app
-              echo "Creating new container app..."
-              az containerapp create \
+              # Create new revision
+              echo "Creating new revision..."
+              az containerapp revision create \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
-                --environment managedEnvironment-container-app-rsgp-3eb4 \
                 --revision-suffix "${REVISION_SUFFIX}" \
                 --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
                 --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                 --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                 --cpu 0.5 \
                 --memory 1.0Gi \
-                --registry-server ${{ env.ACR_NAME }}.azurecr.io \
-                --target-port 8080 \
-                --ingress external \
                 --env-vars \
                   RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                   STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -220,6 +229,7 @@ jobs:
                   API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                   API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
+                  
       - name: Verify Deployment
         run: |
           echo "Verifying deployment..."
