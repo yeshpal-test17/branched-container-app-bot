@@ -34,50 +34,48 @@ jobs:
 
 
 
-      - name: Cleanup Existing Revisions
+      - name: Cleanup Active Revisions
         run: |
-            echo "Starting cleanup of container app revisions..."
+            echo "Starting cleanup of active revisions..."
             
-            # Function to cleanup revisions for a container app
-            cleanup_container_app() {
+            # Function to deactivate all active revisions for a container app
+            deactivate_all_active_revisions() {
               local app_name=$1
-              echo "Cleaning up revisions for container app: $app_name"
+              echo "Processing container app: $app_name"
               
-              # List all revisions
-              REVISIONS=$(az containerapp revision list \
+              # List all active revisions
+              ACTIVE_REVISIONS=$(az containerapp revision list \
                 -n "$app_name" \
                 -g ${{ env.RESOURCE_GROUP }} \
-                --query "[].name" -o tsv)
+                --query "[?properties.active].name" -o tsv)
+              
+              if [ -n "$ACTIVE_REVISIONS" ]; then
+                echo "Found active revisions:"
+                echo "$ACTIVE_REVISIONS"
                 
-              if [ -n "$REVISIONS" ]; then
-                echo "Found revisions to clean up:"
-                echo "$REVISIONS"
-                
-                # Deactivate each revision
-                echo "$REVISIONS" | while read -r revision; do
+                while IFS= read -r revision; do
                   if [ -n "$revision" ]; then
                     echo "Deactivating revision: $revision"
                     az containerapp revision deactivate \
                       --name "$app_name" \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision" || true
+                      --revision "$revision"
                   fi
-                done
+                done <<< "$ACTIVE_REVISIONS"
               else
-                echo "No revisions found for $app_name"
+                echo "No active revisions found for $app_name"
               fi
             }
             
-            # Clean up branched container app only if not prod deployment
-            if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
-              cleanup_container_app "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
-            else
-              cleanup_container_app "${{ env.PROD_CONTAINER_APP_NAME }}"
-            fi
+            # Cleanup both container apps
+            echo "Cleaning branched-container-app-bot..."
+            deactivate_all_active_revisions "${{ env.BRANCHED_CONTAINER_APP_NAME }}"
             
-            echo "Cleanup completed. Waiting 30 seconds before proceeding..."
-            sleep 30
-
+            echo "Cleaning m21-live..."
+            deactivate_all_active_revisions "${{ env.PROD_CONTAINER_APP_NAME }}"
+            
+            echo "Cleanup completed. Waiting 60 seconds before proceeding..."
+            sleep 60
 
       - name: Set deployment info
         id: set_deployment_info
