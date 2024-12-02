@@ -181,42 +181,29 @@ jobs:
 
       - name: Deploy Container App
         run: |
-          # Get timestamp for new revision
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
-          
-          # Get the current container app config
-          CURRENT_CONFIG=$(az containerapp show \
-            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }})
-          
-          # Create the new container configuration
-          CONTAINER_CONFIG="{
-            \"name\": \"${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}\",
-            \"image\": \"${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }}\",
-            \"resources\": {
-              \"cpu\": 0.5,
-              \"memory\": \"1.0Gi\"
-            },
-            \"env\": [
-              {\"name\": \"RELEASE_TAG\", \"value\": \"${{ steps.set_deployment_info.outputs.RELEASE_TAG }}\"},
-              {\"name\": \"STAGE\", \"value\": \"${{ steps.set_deployment_info.outputs.STAGE }}\"},
-              {\"name\": \"PYTHONUNBUFFERED\", \"value\": \"1\"},
-              {\"name\": \"BOT_TOKEN\", \"secretRef\": \"${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}\"},
-              {\"name\": \"API_ID\", \"secretRef\": \"${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }}\"},
-              {\"name\": \"API_HASH\", \"secretRef\": \"${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}\"}
-            ]
-          }"
-          
-          # Update the container app with single container
-          az containerapp update \
-            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --revision-suffix "${REVISION_SUFFIX}" \
-            --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-            --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-            --containers "$CONTAINER_CONFIG"
-
+              # Get timestamp for new revision
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+              
+              # Deploy the container app with a single container
+              az containerapp update \
+                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --revision-suffix "${REVISION_SUFFIX}" \
+                --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+                --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+                --cpu 0.5 \
+                --memory 1.0Gi \
+                --set-env-vars \
+                  "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
+                  "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
+                  "PYTHONUNBUFFERED=1" \
+                  "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
+                  "API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }}" \
+                  "API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}"
+    
       - name: Verify Deployment
         run: |
           echo "Verifying deployment..."
