@@ -212,13 +212,13 @@ jobs:
                 --registry-server ${{ env.ACR_NAME }}.azurecr.io \
                 --target-port 8080 \
                 --ingress external \
-                --set-env-vars \
-                  "RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
-                  "STAGE=${{ steps.set_deployment_info.outputs.STAGE }}" \
-                  "PYTHONUNBUFFERED=1" \
-                  "BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }}" \
-                  "API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }}" \
-                  "API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}"
+                --env-vars \
+                  RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                  STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                  PYTHONUNBUFFERED=1 \
+                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                  API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+                  API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
       - name: Verify Deployment
         run: |
