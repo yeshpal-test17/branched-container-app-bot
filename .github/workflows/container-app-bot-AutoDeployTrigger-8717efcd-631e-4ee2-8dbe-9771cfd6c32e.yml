@@ -181,88 +181,84 @@ jobs:
 
       - name: Deploy Container App
         run: |
-              # Get timestamp for new revision
-              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-              REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+                  # Get timestamp for new revision
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                  REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+                  
+                  echo "Deactivating existing revisions..."
+                  # List all active revisions
+                  ACTIVE_REVISIONS=$(az containerapp revision list \
+                    -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                    -g ${{ env.RESOURCE_GROUP }} \
+                    --query "[?properties.active].name" -o tsv)
+                  
+                  # Deactivate each revision
+                  if [ -n "$ACTIVE_REVISIONS" ]; then
+                    while IFS= read -r revision; do
+                      if [ -n "$revision" ]; then
+                        echo "Deactivating revision: $revision"
+                        az containerapp revision deactivate \
+                          --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                          --resource-group ${{ env.RESOURCE_GROUP }} \
+                          --revision "$revision"
+                      fi
+                    done <<< "$ACTIVE_REVISIONS"
+                  fi
+                  
+                  # Wait for deactivation to complete
+                  echo "Waiting for deactivation to complete..."
+                  sleep 30
+                  
+                  # Create new revision using update command
+                  echo "Creating new revision..."
+                  az containerapp update \
+                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --revision-suffix "${REVISION_SUFFIX}" \
+                    --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+                    --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                    --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+                    --cpu 0.5 \
+                    --memory 1.0Gi \
+                    --set-env-vars \
+                      RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                      STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                      PYTHONUNBUFFERED=1 \
+                      BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                      API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+                      API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+    
+      - name: Verify Deployment
+        run: |
+              echo "Verifying deployment..."
               
-              echo "Deactivating existing revisions..."
-              # List all active revisions
+              # Wait for deployment to stabilize
+              sleep 90
+              
+              # Get current active revisions
               ACTIVE_REVISIONS=$(az containerapp revision list \
                 -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].name" -o tsv)
+                --query "[?properties.active].{name:name, replicas:properties.replicas}" -o json)
               
-              # Deactivate each revision
-              if [ -n "$ACTIVE_REVISIONS" ]; then
-                while IFS= read -r revision; do
-                  if [ -n "$revision" ]; then
-                    echo "Deactivating revision: $revision"
-                    az containerapp revision deactivate \
-                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision"
-                  fi
-                done <<< "$ACTIVE_REVISIONS"
+              echo "Current active revisions:"
+              echo "$ACTIVE_REVISIONS" | jq '.'
+              
+              # Define expected values
+              SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.STAGE }}-"
+              
+              echo "Looking for revision with pattern: $SUFFIX_PATTERN"
+              
+              # Verify deployment based only on the revision name pattern
+              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))" > /dev/null; then
+                echo "✅ Deployment verified successfully"
+                echo "Active revision details:"
+                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))"
+              else
+                echo "❌ Deployment verification failed"
+                echo "Debug information:"
+                echo "Expected suffix pattern: $SUFFIX_PATTERN"
+                echo "All active revisions:"
+                echo "$ACTIVE_REVISIONS" | jq '.'
+                exit 1
               fi
-              
-              # Wait for deactivation to complete
-              echo "Waiting for deactivation to complete..."
-              sleep 30
-              
-              # Create new revision
-              echo "Creating new revision..."
-              az containerapp update \
-                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --revision-suffix "${REVISION_SUFFIX}" \
-                --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-                --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                --cpu 0.5 \
-                --memory 1.0Gi \
-                --set-env-vars \
-                  RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                  STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                  PYTHONUNBUFFERED=1 \
-                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                  API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
-                  API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
-    
-
-      - name: Verify Deployment
-        run: |
-          echo "Verifying deployment..."
-          
-          # Wait for deployment to stabilize
-          sleep 90
-          
-          # Get current active revisions
-          ACTIVE_REVISIONS=$(az containerapp revision list \
-            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            -g ${{ env.RESOURCE_GROUP }} \
-            --query "[?properties.active].{name:name, replicas:properties.replicas, container:properties.template.containers[0].name}" -o json)
-          
-          echo "Current active revisions:"
-          echo "$ACTIVE_REVISIONS" | jq '.'
-          
-          # Define expected values
-          EXPECTED_CONTAINER="${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
-          SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.STAGE }}-"
-          
-          echo "Looking for revision with pattern: $SUFFIX_PATTERN and container: $EXPECTED_CONTAINER"
-          
-          # Verify deployment
-          if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")" > /dev/null; then
-            echo "✅ Deployment verified successfully"
-            echo "Active revision details:"
-            echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\")) | select(.container == \"$EXPECTED_CONTAINER\")"
-          else
-            echo "❌ Deployment verification failed"
-            echo "Debug information:"
-            echo "Expected container name: $EXPECTED_CONTAINER"
-            echo "Expected suffix pattern: $SUFFIX_PATTERN"
-            echo "All active revisions:"
-            echo "$ACTIVE_REVISIONS" | jq '.'
-            exit 1
-          fi
