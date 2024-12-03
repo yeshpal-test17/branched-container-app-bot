@@ -29,7 +29,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.AZURE_CREDENTIALS }}
+          creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.M21_DEVELOPMENT_CONTAINERAPPBOTRELEASESP }}
 
       - name: Cleanup Active Revisions
         run: |
@@ -229,7 +229,7 @@ jobs:
                   API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                   API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
-                  
+
       - name: Verify Deployment
         run: |
           echo "Verifying deployment..."
