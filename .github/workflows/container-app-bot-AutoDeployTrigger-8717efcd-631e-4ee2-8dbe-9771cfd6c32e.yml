@@ -211,7 +211,7 @@ jobs:
               
               # Create new revision
               echo "Creating new revision..."
-              az containerapp revision create \
+              az containerapp update \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
                 --revision-suffix "${REVISION_SUFFIX}" \
@@ -221,7 +221,7 @@ jobs:
                 --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                 --cpu 0.5 \
                 --memory 1.0Gi \
-                --env-vars \
+                --set-env-vars \
                   RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                   STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
                   PYTHONUNBUFFERED=1 \
