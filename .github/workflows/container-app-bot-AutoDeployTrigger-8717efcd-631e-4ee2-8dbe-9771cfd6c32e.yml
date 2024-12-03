@@ -217,6 +217,7 @@ jobs:
                     --revision-suffix "${REVISION_SUFFIX}" \
                     --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
                     --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+                    --container-name m21-development \
                     --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                     --cpu 0.5 \
                     --memory 1.0Gi \
