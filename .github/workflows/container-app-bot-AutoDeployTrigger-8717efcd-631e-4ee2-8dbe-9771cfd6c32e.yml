@@ -164,6 +164,20 @@ jobs:
             echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
           fi
 
+
+          echo "=== Deployment Information ==="
+          echo "STAGE: ${{ steps.set_deployment_info.outputs.STAGE }}"
+          echo "CONTAINER_NAME: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+          echo "CONTAINER_APP_NAME: ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }}"
+          echo "IMAGE_TAG: ${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
+          echo "RELEASE_TAG: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
+          echo "IS_PROD: ${{ steps.set_deployment_info.outputs.IS_PROD }}"
+          echo "EVENT_NAME: ${{ github.event_name }}"
+          echo "REF: ${{ github.ref }}"
+          echo "=========================="
+
+
+
       - name: Build and push image to ACR
         run: |
           # Clean up old images with the same tag
