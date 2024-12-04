@@ -179,29 +179,12 @@ jobs:
               echo "Waiting for deactivation to complete..."
               sleep 30
               
-              # Create secrets array based on environment
-              SECRETS="["
-              if [[ "${{ steps.set_deployment_info.outputs.STAGE }}" == "dev" ]]; then
-                SECRETS+="{'name':'dev-bot-token','value':'${{ secrets.DEV_BOT_TOKEN }}'},"
-              elif [[ "${{ steps.set_deployment_info.outputs.STAGE }}" == "test" ]]; then
-                SECRETS+="{'name':'test-bot-token','value':'${{ secrets.TEST_BOT_TOKEN }}'},"
-              elif [[ "${{ steps.set_deployment_info.outputs.STAGE }}" == "staging" ]]; then
-                SECRETS+="{'name':'master-bot-token','value':'${{ secrets.MASTER_BOT_TOKEN }}'},"
-              else
-                SECRETS+="{'name':'bottokern','value':'${{ secrets.BOTTOKERN }}'},"
-              fi
-              SECRETS+="{'name':'api-id','value':'${{ secrets.API_ID }}'},"
-              SECRETS+="{'name':'apiid','value':'${{ secrets.API_ID }}'},"
-              SECRETS+="{'name':'api-hash','value':'${{ secrets.API_HASH }}'},"
-              SECRETS+="{'name':'apihash','value':'${{ secrets.API_HASH }}'}"
-              SECRETS+="]"
-              
               # Create new revision using create command
               echo "Creating new revision..."
               az containerapp create \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
-                --environment container-app-bot-env \
+                --environment managed-environment \
                 --revision-suffix "${REVISION_SUFFIX}" \
                 --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
                 --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
@@ -210,16 +193,19 @@ jobs:
                 --cpu 0.5 \
                 --memory 1.0Gi \
                 --registry-server ${{ env.ACR_NAME }}.azurecr.io \
-                --secrets "$SECRETS" \
+                --secrets \
+                  dev-bot-token="${{ secrets.DEV_BOT_TOKEN }}" \
+                  api-id="${{ secrets.API_ID }}" \
+                  api-hash="${{ secrets.API_HASH }}" \
                 --env-vars \
                   RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
                   STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
                   PYTHONUNBUFFERED="1" \
-                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                  API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
-                  API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+                  BOT_TOKEN=secretref:dev-bot-token \
+                  API_ID=secretref:api-id \
+                  API_HASH=secretref:api-hash
     
-
+                  
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
