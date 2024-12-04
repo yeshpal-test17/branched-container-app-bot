@@ -184,6 +184,7 @@ jobs:
               az containerapp create \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
+                --environment container-app-bot-env \
                 --revision-suffix "${REVISION_SUFFIX}" \
                 --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
                 --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
