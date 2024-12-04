@@ -158,7 +158,7 @@ jobs:
                       "containers": [
                         {
                           "name": "container-app-bot-dev",
-                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-dev:${{ steps.set_deployment_info.outputs.STAGE == '"'"'dev'"'"' && steps.set_deployment_info.outputs.IMAGE_TAG || '"'"'dev-latest'"'"' }}",
+                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-dev:${{ (steps.set_deployment_info.outputs.STAGE == 'dev' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'dev-latest' }}",
                           "resources": {"cpu": 0.5, "memory": "1.0Gi"},
                           "env": [
                             {"name": "RELEASE_TAG", "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"},
@@ -171,7 +171,7 @@ jobs:
                         },
                         {
                           "name": "container-app-bot-test",
-                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-test:${{ steps.set_deployment_info.outputs.STAGE == '"'"'test'"'"' && steps.set_deployment_info.outputs.IMAGE_TAG || '"'"'test-latest'"'"' }}",
+                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-test:${{ (steps.set_deployment_info.outputs.STAGE == 'test' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'test-latest' }}",
                           "resources": {"cpu": 0.5, "memory": "1.0Gi"},
                           "env": [
                             {"name": "RELEASE_TAG", "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"},
@@ -184,7 +184,7 @@ jobs:
                         },
                         {
                           "name": "container-app-bot-staging",
-                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-staging:${{ steps.set_deployment_info.outputs.STAGE == '"'"'staging'"'"' && steps.set_deployment_info.outputs.IMAGE_TAG || '"'"'staging-latest'"'"' }}",
+                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-staging:${{ (steps.set_deployment_info.outputs.STAGE == 'staging' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'staging-latest' }}",
                           "resources": {"cpu": 0.5, "memory": "1.0Gi"},
                           "env": [
                             {"name": "RELEASE_TAG", "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"},
