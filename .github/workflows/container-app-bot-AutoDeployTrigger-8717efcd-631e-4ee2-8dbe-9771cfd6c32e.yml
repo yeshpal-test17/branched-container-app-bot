@@ -193,6 +193,15 @@ jobs:
                 --cpu 0.5 \
                 --memory 1.0Gi \
                 --registry-server ${{ env.ACR_NAME }}.azurecr.io \
+                --secrets \
+                  dev-bot-token="${{ secrets.DEV_BOT_TOKEN }}" \
+                  test-bot-token="${{ secrets.TEST_BOT_TOKEN }}" \
+                  master-bot-token="${{ secrets.MASTER_BOT_TOKEN }}" \
+                  bottokern="${{ secrets.BOTTOKERN }}" \
+                  api-id="${{ secrets.API_ID }}" \
+                  apiid="${{ secrets.API_ID }}" \
+                  api-hash="${{ secrets.API_HASH }}" \
+                  apihash="${{ secrets.API_HASH }}" \
                 --env-vars \
                   RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
                   STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
@@ -201,6 +210,7 @@ jobs:
                   API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                   API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
+
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
