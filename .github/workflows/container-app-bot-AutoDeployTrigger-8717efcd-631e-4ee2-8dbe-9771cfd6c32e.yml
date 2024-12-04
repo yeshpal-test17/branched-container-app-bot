@@ -193,7 +193,7 @@ jobs:
                     --cpu 0.5 \
                     --memory 1.0Gi \
                     --registry-server ${{ env.ACR_NAME }}.azurecr.io \
-                    --set-env-vars \
+                    -env-vars \
                       RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                       STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
                       PYTHONUNBUFFERED=1 \
