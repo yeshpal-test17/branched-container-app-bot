@@ -145,64 +145,78 @@ jobs:
               TIMESTAMP=$(date +%Y%m%d-%H%M%S)
               REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
               
-              # Update container app with new revision
+              # Create a temporary YAML file
+              cat > config.yaml << EOF
+              properties:
+                template:
+                  containers:
+                    - name: container-app-bot-dev
+                      image: ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-dev:${{ (steps.set_deployment_info.outputs.STAGE == 'dev' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'dev-latest' }}
+                      resources:
+                        cpu: 0.5
+                        memory: 1.0Gi
+                      env:
+                        - name: RELEASE_TAG
+                          value: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}
+                        - name: STAGE
+                          value: dev
+                        - name: PYTHONUNBUFFERED
+                          value: "1"
+                        - name: BOT_TOKEN
+                          secretRef: dev-bot-token
+                        - name: API_ID
+                          secretRef: api-id
+                        - name: API_HASH
+                          secretRef: api-hash
+                    - name: container-app-bot-test
+                      image: ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-test:${{ (steps.set_deployment_info.outputs.STAGE == 'test' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'test-latest' }}
+                      resources:
+                        cpu: 0.5
+                        memory: 1.0Gi
+                      env:
+                        - name: RELEASE_TAG
+                          value: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}
+                        - name: STAGE
+                          value: test
+                        - name: PYTHONUNBUFFERED
+                          value: "1"
+                        - name: BOT_TOKEN
+                          secretRef: test-bot-token
+                        - name: API_ID
+                          secretRef: api-id
+                        - name: API_HASH
+                          secretRef: api-hash
+                    - name: container-app-bot-staging
+                      image: ${{ env.ACR_NAME }}.azurecr.io/container-app-bot-staging:${{ (steps.set_deployment_info.outputs.STAGE == 'staging' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'staging-latest' }}
+                      resources:
+                        cpu: 0.5
+                        memory: 1.0Gi
+                      env:
+                        - name: RELEASE_TAG
+                          value: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}
+                        - name: STAGE
+                          value: staging
+                        - name: PYTHONUNBUFFERED
+                          value: "1"
+                        - name: BOT_TOKEN
+                          secretRef: master-bot-token
+                        - name: API_ID
+                          secretRef: api-id
+                        - name: API_HASH
+                          secretRef: api-hash
+                  scale:
+                    minReplicas: ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }}
+                    maxReplicas: ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }}
+              EOF
+    
+              # Update container app with new revision using the config file
               az containerapp update \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
                 --revision-suffix "${REVISION_SUFFIX}" \
                 --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
                 --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                --yaml-config '{
-                  "properties": {
-                    "template": {
-                      "containers": [
-                        {
-                          "name": "container-app-bot-dev",
-                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-dev:${{ (steps.set_deployment_info.outputs.STAGE == 'dev' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'dev-latest' }}",
-                          "resources": {"cpu": 0.5, "memory": "1.0Gi"},
-                          "env": [
-                            {"name": "RELEASE_TAG", "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"},
-                            {"name": "STAGE", "value": "dev"},
-                            {"name": "PYTHONUNBUFFERED", "value": "1"},
-                            {"name": "BOT_TOKEN", "secretRef": "dev-bot-token"},
-                            {"name": "API_ID", "secretRef": "api-id"},
-                            {"name": "API_HASH", "secretRef": "api-hash"}
-                          ]
-                        },
-                        {
-                          "name": "container-app-bot-test",
-                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-test:${{ (steps.set_deployment_info.outputs.STAGE == 'test' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'test-latest' }}",
-                          "resources": {"cpu": 0.5, "memory": "1.0Gi"},
-                          "env": [
-                            {"name": "RELEASE_TAG", "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"},
-                            {"name": "STAGE", "value": "test"},
-                            {"name": "PYTHONUNBUFFERED", "value": "1"},
-                            {"name": "BOT_TOKEN", "secretRef": "test-bot-token"},
-                            {"name": "API_ID", "secretRef": "api-id"},
-                            {"name": "API_HASH", "secretRef": "api-hash"}
-                          ]
-                        },
-                        {
-                          "name": "container-app-bot-staging",
-                          "image": "${{ env.ACR_NAME }}.azurecr.io/container-app-bot-staging:${{ (steps.set_deployment_info.outputs.STAGE == 'staging' && steps.set_deployment_info.outputs.IMAGE_TAG) || 'staging-latest' }}",
-                          "resources": {"cpu": 0.5, "memory": "1.0Gi"},
-                          "env": [
-                            {"name": "RELEASE_TAG", "value": "${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"},
-                            {"name": "STAGE", "value": "staging"},
-                            {"name": "PYTHONUNBUFFERED", "value": "1"},
-                            {"name": "BOT_TOKEN", "secretRef": "master-bot-token"},
-                            {"name": "API_ID", "secretRef": "api-id"},
-                            {"name": "API_HASH", "secretRef": "api-hash"}
-                          ]
-                        }
-                      ],
-                      "scale": {
-                        "minReplicas": ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }},
-                        "maxReplicas": ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }}
-                      }
-                    }
-                  }
-                }'
+                --yaml-config "@config.yaml"
 
       - name: Verify Deployment
         run: |
