@@ -196,14 +196,9 @@ jobs:
                   RELEASE_TAG="${{ steps.set_deployment_info.outputs.RELEASE_TAG }}" \
                   STAGE="${{ steps.set_deployment_info.outputs.STAGE }}" \
                   PYTHONUNBUFFERED="1" \
-                --secrets \
-                  "bot-token=${{ secrets.DEV_BOT_TOKEN }}" \
-                  "api-id=${{ secrets.API_ID }}" \
-                  "api-hash=${{ secrets.API_HASH }}" \
-                --secret-env-vars \
-                  "BOT_TOKEN=bot-token" \
-                  "API_ID=api-id" \
-                  "API_HASH=api-hash"
+                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                  API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+                  API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
       - name: Verify Deployment
         run: |
