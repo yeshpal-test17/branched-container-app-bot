@@ -175,8 +175,6 @@ jobs:
                 done <<< "$ACTIVE_REVISIONS"
               fi
               
-
-              
               # Wait for deactivation to complete
               echo "Waiting for deactivation to complete..."
               sleep 30
@@ -193,6 +191,9 @@ jobs:
                 --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                 --cpu 0.5 \
                 --memory 1.0Gi \
+                --target-port 800 \
+                --ingress external \
+                --remove-containers m21-development \
                 --set-env-vars \
                   RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                   STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
