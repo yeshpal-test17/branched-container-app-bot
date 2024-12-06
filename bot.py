@@ -15,7 +15,7 @@ API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 STAGE = os.getenv("STAGE", "dev")
 #PORT = 8080 if STAGE == "prod" else 800
-PORT = 800
+PORT = 8080
 
 def init_bot():
     return Client(
