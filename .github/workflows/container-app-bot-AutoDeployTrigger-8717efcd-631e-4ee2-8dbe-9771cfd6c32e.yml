@@ -179,7 +179,6 @@ jobs:
               echo "Waiting for deactivation to complete..."
               sleep 30
               
-              
               # Create new revision using update command
               echo "Creating new revision..."
               az containerapp update \
