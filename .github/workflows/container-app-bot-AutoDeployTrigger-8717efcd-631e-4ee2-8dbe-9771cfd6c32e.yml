@@ -63,6 +63,7 @@ jobs:
             BRANCH_REF="${{ github.ref }}"
           fi
 
+          
           # Set environment variables based on branch
           case "$BRANCH_REF" in
             "refs/heads/develop")
