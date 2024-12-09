@@ -218,17 +218,23 @@ jobs:
       - name: Schedule Scale Reset
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
-                    # Create a script that will reset the scaling after 1 hour
-                    RESET_TIME=$(date -d "+1 hour" -u '+%Y-%m-%d %H:%M:%S')
+                    echo "Scheduling scale reset for 1 hour from now..."
                     
-                    # Schedule the reset command using at
-                    echo "az containerapp update \
-                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --min-replicas 0 \
-                      --scale-rule-name 'cpu-scale' \
-                      --scale-rule-type cpu \
-                      --scale-rule-metadata type=Utilization value=70" | at $RESET_TIME
+                    # Start a background process that will wait for 1 hour and then reset the scaling
+                    (
+                      sleep 3600  # Wait for 1 hour (3600 seconds)
+                      echo "Executing scale reset..."
+                      az containerapp update \
+                        --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                        --resource-group ${{ env.RESOURCE_GROUP }} \
+                        --min-replicas 0 \
+                        --scale-rule-name 'cpu-scale' \
+                        --scale-rule-type cpu \
+                        --scale-rule-metadata type=Utilization value=70
+                    ) &
+                    
+                    # Store the background process ID
+                    echo "Background process started with PID: $!"
           
       - name: Verify Initial Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
@@ -248,6 +254,7 @@ jobs:
                       echo "Warning: Expected minimum replicas to be 1, but got $REPLICAS"
                       exit 1
                     fi
+
                   
       - name: Verify Deployment
         run: |
