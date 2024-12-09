@@ -207,13 +207,15 @@ jobs:
         run: |
                     echo "Setting up development environment scale rule..."
                     
-                    # Setting CPU percentage very low (1%) to ensure replica stays running
                     az containerapp update \
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
                       --min-replicas 1 \
-                      --scale-rules '[{"name":"dev-keep-alive","custom":{"type":"cpu","metadata":{"type":"Utilization","value":"1"}}}]'
-                
+                      --scale-rule-name "dev-keep-alive" \
+                      --scale-rule-type custom \
+                      --scale-rule-metadata "type=Utilization" "value=1" \
+                      --scale-rule-auth "kubernetes.io/cpu=true"
+          
       - name: Schedule Scale Reset
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
@@ -225,28 +227,29 @@ jobs:
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
                       --min-replicas 0 \
-                      --scale-rules '[{\"name\":\"cpu-scale\",\"custom\":{\"type\":\"cpu\",\"metadata\":{\"type\":\"Utilization\",\"value\":\"70\"}}}]'" | at $RESET_TIME
-
-
+                      --scale-rule-name 'cpu-scale' \
+                      --scale-rule-type custom \
+                      --scale-rule-metadata 'type=Utilization' 'value=70' \
+                      --scale-rule-auth 'kubernetes.io/cpu=true'" | at $RESET_TIME
+          
       - name: Verify Initial Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
-                        echo "Verifying scale rule configuration..."
-                        sleep 30
-                        
-                        # Check current replicas
-                        REPLICAS=$(az containerapp show \
-                          --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                          --resource-group ${{ env.RESOURCE_GROUP }} \
-                          --query "properties.template.scale.minReplicas" -o tsv)
-                        
-                        echo "Current minimum replicas: $REPLICAS"
-                        
-                        if [ "$REPLICAS" != "1" ]; then
-                          echo "Warning: Expected minimum replicas to be 1, but got $REPLICAS"
-                          exit 1
-                        fi
-          
+                    echo "Verifying scale rule configuration..."
+                    sleep 30
+                    
+                    # Check current replicas
+                    REPLICAS=$(az containerapp show \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --query "properties.template.scale.minReplicas" -o tsv)
+                    
+                    echo "Current minimum replicas: $REPLICAS"
+                    
+                    if [ "$REPLICAS" != "1" ]; then
+                      echo "Warning: Expected minimum replicas to be 1, but got $REPLICAS"
+                      exit 1
+                    fi
                   
       - name: Verify Deployment
         run: |
