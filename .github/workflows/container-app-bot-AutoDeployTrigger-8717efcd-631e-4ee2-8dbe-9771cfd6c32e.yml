@@ -213,7 +213,7 @@ jobs:
                       --min-replicas 1 \
                       --scale-rule-name "dev-keep-alive" \
                       --scale-rule-type cpu \
-                      --scale-rule-metadata targetUtilization=1
+                      --scale-rule-metadata type=Utilization value=1
           
       - name: Schedule Scale Reset
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
@@ -228,7 +228,7 @@ jobs:
                       --min-replicas 0 \
                       --scale-rule-name 'cpu-scale' \
                       --scale-rule-type cpu \
-                      --scale-rule-metadata targetUtilization=70" | at $RESET_TIME
+                      --scale-rule-metadata type=Utilization value=70" | at $RESET_TIME
           
       - name: Verify Initial Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
