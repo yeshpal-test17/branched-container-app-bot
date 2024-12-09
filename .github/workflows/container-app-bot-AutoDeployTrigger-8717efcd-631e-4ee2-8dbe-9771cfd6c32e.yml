@@ -202,43 +202,50 @@ jobs:
                   API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
 
-
       - name: Set Development Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
-          echo "Setting up development environment scale rule..."
+                    echo "Setting up development environment scale rule..."
                     
-          # Calculate the end time (1 hour from now)
-          START_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          END_TIME=$(date -d "+1 hour" -u '+%Y-%m-%dT%H:%M:%SZ')
-                    
-          echo "Scale rule time window: $START_TIME to $END_TIME"
-                    
-          # Apply the scale rule
-          az containerapp update \
-            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --min-replicas 1 \
-            --scale-rule-name "dev-keep-alive" \
-            --scale-rule-type custom \
-            --custom-scale-rule "{\"custom\":{\"type\":\"time-trigger\",\"metadata\":{\"start\":\"$START_TIME\",\"end\":\"$END_TIME\",\"timezone\":\"UTC\"}}}"
-
-
-      - name: Verify Scale Rule
+                    # Setting CPU percentage very low (1%) to ensure replica stays running
+                    az containerapp update \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --min-replicas 1 \
+                      --scale-rules '[{"name":"dev-keep-alive","custom":{"type":"cpu","metadata":{"type":"Utilization","value":"1"}}}]'
+                
+      - name: Schedule Scale Reset
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
-              echo "Verifying scale rule configuration..."
-              
-              # Wait for scale rule to be applied
-              sleep 30
-              
-              # Check current replicas
-              REPLICAS=$(az containerapp show \
-                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --query "properties.template.scale.minReplicas" -o tsv)
-              
-              echo "Current minimum replicas: $REPLICAS"
+                    # Create a script that will reset the scaling after 1 hour
+                    RESET_TIME=$(date -d "+1 hour" -u '+%Y-%m-%d %H:%M:%S')
+                    
+                    # Schedule the reset command using at
+                    echo "az containerapp update \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --min-replicas 0 \
+                      --scale-rules '[{\"name\":\"cpu-scale\",\"custom\":{\"type\":\"cpu\",\"metadata\":{\"type\":\"Utilization\",\"value\":\"70\"}}}]'" | at $RESET_TIME
+
+
+      - name: Verify Initial Scale Rule
+        if: steps.set_deployment_info.outputs.STAGE == 'dev'
+        run: |
+                        echo "Verifying scale rule configuration..."
+                        sleep 30
+                        
+                        # Check current replicas
+                        REPLICAS=$(az containerapp show \
+                          --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                          --resource-group ${{ env.RESOURCE_GROUP }} \
+                          --query "properties.template.scale.minReplicas" -o tsv)
+                        
+                        echo "Current minimum replicas: $REPLICAS"
+                        
+                        if [ "$REPLICAS" != "1" ]; then
+                          echo "Warning: Expected minimum replicas to be 1, but got $REPLICAS"
+                          exit 1
+                        fi
           
                   
       - name: Verify Deployment
