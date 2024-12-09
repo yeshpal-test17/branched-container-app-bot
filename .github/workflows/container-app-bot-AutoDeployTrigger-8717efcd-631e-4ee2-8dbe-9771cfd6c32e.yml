@@ -203,61 +203,42 @@ jobs:
     
 
 
-      # Add this new step after Deploy Container App
       - name: Set Development Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
           echo "Setting up development environment scale rule..."
-          
+                    
           # Calculate the end time (1 hour from now)
           START_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           END_TIME=$(date -d "+1 hour" -u '+%Y-%m-%dT%H:%M:%SZ')
-          
+                    
           echo "Scale rule time window: $START_TIME to $END_TIME"
-          
+                    
           # Apply the scale rule
           az containerapp update \
             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
+            --min-replicas 1 \
             --scale-rule-name "dev-keep-alive" \
             --scale-rule-type custom \
-            --scale-rule-custom-rule "{
-              'custom': {
-                'type': 'time-trigger',
-                'metadata': {
-                  'start': '$START_TIME',
-                  'end': '$END_TIME',
-                  'timezone': 'UTC'
-                }
-              }
-            }" \
-            --min-replicas 1
+            --custom-scale-rule "{\"custom\":{\"type\":\"time-trigger\",\"metadata\":{\"start\":\"$START_TIME\",\"end\":\"$END_TIME\",\"timezone\":\"UTC\"}}}"
 
-      # Add this new step for verification
+
       - name: Verify Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
-          echo "Verifying scale rule configuration..."
-          
-          # Wait for scale rule to be applied
-          sleep 30
-          
-          # Check scale rule configuration
-          SCALE_RULES=$(az containerapp show \
-            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --query "properties.template.scale.rules" -o json)
-          
-          echo "Current scale rules:"
-          echo "$SCALE_RULES" | jq '.'
-          
-          # Verify minimum replicas
-          CURRENT_REPLICAS=$(az containerapp show \
-            --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --query "properties.template.scale.minReplicas" -o tsv)
-          
-          echo "Current minimum replicas: $CURRENT_REPLICAS"
+              echo "Verifying scale rule configuration..."
+              
+              # Wait for scale rule to be applied
+              sleep 30
+              
+              # Check current replicas
+              REPLICAS=$(az containerapp show \
+                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --query "properties.template.scale.minReplicas" -o tsv)
+              
+              echo "Current minimum replicas: $REPLICAS"
           
                   
       - name: Verify Deployment
