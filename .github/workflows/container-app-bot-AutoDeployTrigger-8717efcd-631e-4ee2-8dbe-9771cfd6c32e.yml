@@ -31,6 +31,146 @@ jobs:
         with:
           creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.M21_DEVELOPMENT_CONTAINERAPPBOTRELEASESP }}
 
+      - name: Emergency Revision Cleanup
+        run: |
+            echo "Performing emergency revision cleanup..."
+            
+            # Get all active revisions
+            ACTIVE_REVISIONS=$(az containerapp revision list \
+              -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              -g ${{ env.RESOURCE_GROUP }} \
+              --query "[?properties.active].{name:name,replicas:properties.replicas}" -o json)
+            
+            # Count active revisions
+            ACTIVE_COUNT=$(echo "$ACTIVE_REVISIONS" | jq length)
+            
+            if [ $ACTIVE_COUNT -gt 1 ]; then
+              echo "WARNING: Found $ACTIVE_COUNT active revisions"
+              
+              # Find any revision with more than expected replicas
+              echo "$ACTIVE_REVISIONS" | jq -r '.[]' | while read -r revision; do
+                REPLICA_COUNT=$(echo "$revision" | jq -r '.replicas')
+                REVISION_NAME=$(echo "$revision" | jq -r '.name')
+                
+                if [ $REPLICA_COUNT -gt ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} ]; then
+                  echo "Found revision $REVISION_NAME with $REPLICA_COUNT replicas (exceeds maximum)"
+                  
+                  # Force update the replica count
+                  az containerapp revision deactivate \
+                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                    --resource-group ${{ env.RESOURCE_GROUP }} \
+                    --revision "$REVISION_NAME"
+                  
+                  echo "Deactivated revision $REVISION_NAME"
+                fi
+              done
+            fi
+  
+  # Add this right after the Azure Login step and before the Clean up old revisions step
+      - name: Set deployment info
+        id: set_deployment_info
+        run: |
+            # For releases, use the target branch and validate tag format
+            if [ "${{ github.event_name }}" == "release" ]; then
+              BRANCH_REF="refs/heads/${{ github.event.release.target_commitish }}"
+              TAG_NAME="${{ github.event.release.tag_name }}"
+              
+              # Validate tag format based on branch
+              if [[ "$BRANCH_REF" == "refs/heads/develop" ]]; then
+                if [[ ! "$TAG_NAME" =~ ^alpha-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "Error: Invalid tag format for develop branch. Must be 'alpha-x.y.z'"
+                  exit 1
+                fi
+                echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
+                echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+              elif [[ "$BRANCH_REF" == "refs/heads/test" ]]; then
+                if [[ ! "$TAG_NAME" =~ ^beta-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "Error: Invalid tag format for test branch. Must be 'beta-x.y.z'"
+                  exit 1
+                fi
+                echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
+                echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+              else
+                echo "Error: Releases are only allowed from develop or test branches."
+                exit 1
+              fi
+            else
+              BRANCH_REF="${{ github.ref }}"
+            fi
+  
+            
+            # Set environment variables based on branch
+            case "$BRANCH_REF" in
+              "refs/heads/develop")
+                echo "STAGE=dev" >> $GITHUB_OUTPUT
+                echo "CONTAINER_NAME=container-app-bot-dev" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=dev-bot-token" >> $GITHUB_OUTPUT
+                echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
+                echo "IS_PROD=false" >> $GITHUB_OUTPUT
+                echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+                echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+                echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
+                ;;
+              "refs/heads/test")
+                echo "STAGE=test" >> $GITHUB_OUTPUT
+                echo "CONTAINER_NAME=container-app-bot-test" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=test-bot-token" >> $GITHUB_OUTPUT
+                echo "IMAGE_TAG=test-latest" >> $GITHUB_OUTPUT
+                echo "IS_PROD=false" >> $GITHUB_OUTPUT
+                echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+                echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+                echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
+                ;;
+              "refs/heads/master")
+                echo "STAGE=staging" >> $GITHUB_OUTPUT
+                echo "CONTAINER_NAME=container-app-bot-staging" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=master-bot-token" >> $GITHUB_OUTPUT
+                echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
+                echo "IS_PROD=false" >> $GITHUB_OUTPUT
+                echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+                echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+                echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
+                ;;
+              "refs/heads/prod")
+                echo "STAGE=prod" >> $GITHUB_OUTPUT
+                echo "CONTAINER_NAME=container-app-bot-prod" >> $GITHUB_OUTPUT
+                echo "BOT_TOKEN_SECRET=bottokern" >> $GITHUB_OUTPUT
+                echo "IMAGE_TAG=prod-latest" >> $GITHUB_OUTPUT
+                echo "IS_PROD=true" >> $GITHUB_OUTPUT
+                echo "CONTAINER_APP_NAME=${{ env.PROD_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
+                echo "MIN_REPLICAS=1" >> $GITHUB_OUTPUT
+                echo "MAX_REPLICAS=10" >> $GITHUB_OUTPUT
+                ;;
+              *)
+                echo "Error: Unsupported branch" >> $GITHUB_OUTPUT
+                exit 1
+                ;;
+            esac
+  
+            # Set release tag for other events
+            if [ "${{ github.event_name }}" == "push" ]; then
+              echo "RELEASE_TAG=pushed-into-${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            elif [ "${{ github.event_name }}" == "pull_request" ]; then
+              echo "RELEASE_TAG=merged-into-${{ github.base.ref }}" >> $GITHUB_OUTPUT
+            elif [ "${{ github.event_name }}" != "release" ]; then
+              echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
+            fi
+  
+  
+  
+            echo "=== Deployment Information ==="
+            echo "STAGE: ${{ steps.set_deployment_info.outputs.STAGE }}"
+            echo "CONTAINER_NAME: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
+            echo "CONTAINER_APP_NAME: ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }}"
+            echo "IMAGE_TAG: ${{ steps.set_deployment_info.outputs.IMAGE_TAG }}"
+            echo "RELEASE_TAG: ${{ steps.set_deployment_info.outputs.RELEASE_TAG }}"
+            echo "IS_PROD: ${{ steps.set_deployment_info.outputs.IS_PROD }}"
+            echo "EVENT_NAME: ${{ github.event_name }}"
+            echo "REF: ${{ github.ref }}"
+            echo "=========================="
+  
+
+
       - name: Set Development Scale Rule
         if: steps.set_deployment_info.outputs.STAGE == 'dev'
         run: |
@@ -45,42 +185,6 @@ jobs:
                       --scale-rule-metadata type=Utilization value=1
 
 
-      - name: Emergency Revision Cleanup
-        run: |
-                        echo "Performing emergency revision cleanup..."
-                        
-                        # Get all active revisions
-                        ACTIVE_REVISIONS=$(az containerapp revision list \
-                          -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                          -g ${{ env.RESOURCE_GROUP }} \
-                          --query "[?properties.active].{name:name,replicas:properties.replicas}" -o json)
-                        
-                        # Count active revisions
-                        ACTIVE_COUNT=$(echo "$ACTIVE_REVISIONS" | jq length)
-                        
-                        if [ $ACTIVE_COUNT -gt 1 ]; then
-                          echo "WARNING: Found $ACTIVE_COUNT active revisions"
-                          
-                          # Find any revision with more than expected replicas
-                          echo "$ACTIVE_REVISIONS" | jq -r '.[]' | while read -r revision; do
-                            REPLICA_COUNT=$(echo "$revision" | jq -r '.replicas')
-                            REVISION_NAME=$(echo "$revision" | jq -r '.name')
-                            
-                            if [ $REPLICA_COUNT -gt ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} ]; then
-                              echo "Found revision $REVISION_NAME with $REPLICA_COUNT replicas (exceeds maximum)"
-                              
-                              # Force update the replica count
-                              az containerapp revision deactivate \
-                                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                                --resource-group ${{ env.RESOURCE_GROUP }} \
-                                --revision "$REVISION_NAME"
-                              
-                              echo "Deactivated revision $REVISION_NAME"
-                            fi
-                          done
-                        fi
-              
-              # Add this right after the Azure Login step and before the Clean up old revisions step
 
       - name: Clean up old revisions
         run: |
