@@ -122,6 +122,7 @@ jobs:
           fi
 
 
+
           echo "=== Deployment Information ==="
           echo "STAGE: ${{ steps.set_deployment_info.outputs.STAGE }}"
           echo "CONTAINER_NAME: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
@@ -200,6 +201,60 @@ jobs:
                   API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                   API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
+
+      - name: Set Development Scale Rule
+        if: steps.set_deployment_info.outputs.STAGE == 'dev'
+        run: |
+                    echo "Setting up development environment scale rule..."
+                    
+                    az containerapp update \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --min-replicas 1 \
+                      --scale-rule-name "dev-keep-alive" \
+                      --scale-rule-type cpu \
+                      --scale-rule-metadata type=Utilization value=1
+          
+      - name: Schedule Scale Reset
+        if: steps.set_deployment_info.outputs.STAGE == 'dev'
+        run: |
+                    echo "Scheduling scale reset for 1 hour from now..."
+                    
+                    # Start a background process that will wait for 1 hour and then reset the scaling
+                    (
+                      sleep 3600  # Wait for 1 hour (3600 seconds)
+                      echo "Executing scale reset..."
+                      az containerapp update \
+                        --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                        --resource-group ${{ env.RESOURCE_GROUP }} \
+                        --min-replicas 0 \
+                        --scale-rule-name 'cpu-scale' \
+                        --scale-rule-type cpu \
+                        --scale-rule-metadata type=Utilization value=70
+                    ) &
+                    
+                    # Store the background process ID
+                    echo "Background process started with PID: $!"
+          
+      - name: Verify Initial Scale Rule
+        if: steps.set_deployment_info.outputs.STAGE == 'dev'
+        run: |
+                    echo "Verifying scale rule configuration..."
+                    sleep 30
+                    
+                    # Check current replicas
+                    REPLICAS=$(az containerapp show \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --query "properties.template.scale.minReplicas" -o tsv)
+                    
+                    echo "Current minimum replicas: $REPLICAS"
+                    
+                    if [ "$REPLICAS" != "1" ]; then
+                      echo "Warning: Expected minimum replicas to be 1, but got $REPLICAS"
+                      exit 1
+                    fi
+
                   
       - name: Verify Deployment
         run: |
