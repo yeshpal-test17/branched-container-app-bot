@@ -44,6 +44,44 @@ jobs:
                       --scale-rule-type cpu \
                       --scale-rule-metadata type=Utilization value=1
 
+
+      - name: Emergency Revision Cleanup
+        run: |
+                        echo "Performing emergency revision cleanup..."
+                        
+                        # Get all active revisions
+                        ACTIVE_REVISIONS=$(az containerapp revision list \
+                          -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                          -g ${{ env.RESOURCE_GROUP }} \
+                          --query "[?properties.active].{name:name,replicas:properties.replicas}" -o json)
+                        
+                        # Count active revisions
+                        ACTIVE_COUNT=$(echo "$ACTIVE_REVISIONS" | jq length)
+                        
+                        if [ $ACTIVE_COUNT -gt 1 ]; then
+                          echo "WARNING: Found $ACTIVE_COUNT active revisions"
+                          
+                          # Find any revision with more than expected replicas
+                          echo "$ACTIVE_REVISIONS" | jq -r '.[]' | while read -r revision; do
+                            REPLICA_COUNT=$(echo "$revision" | jq -r '.replicas')
+                            REVISION_NAME=$(echo "$revision" | jq -r '.name')
+                            
+                            if [ $REPLICA_COUNT -gt ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} ]; then
+                              echo "Found revision $REVISION_NAME with $REPLICA_COUNT replicas (exceeds maximum)"
+                              
+                              # Force update the replica count
+                              az containerapp revision deactivate \
+                                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                                --resource-group ${{ env.RESOURCE_GROUP }} \
+                                --revision "$REVISION_NAME"
+                              
+                              echo "Deactivated revision $REVISION_NAME"
+                            fi
+                          done
+                        fi
+              
+              # Add this right after the Azure Login step and before the Clean up old revisions step
+
       - name: Clean up old revisions
         run: |
           echo "Cleaning up old revisions..."
