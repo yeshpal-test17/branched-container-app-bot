@@ -135,8 +135,9 @@ jobs:
             echo "EVENT_NAME: ${{ github.event_name }}"
             echo "REF: ${{ github.ref }}"
             echo "=========================="
-            - name: Emergency Revision Cleanup
-            run: |
+            
+      - name: Emergency Revision Cleanup
+        run: |
               echo "Performing emergency revision cleanup..."
               
               # Add error handling for Azure CLI commands
