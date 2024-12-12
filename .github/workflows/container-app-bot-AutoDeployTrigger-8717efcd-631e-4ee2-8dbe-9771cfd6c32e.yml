@@ -31,40 +31,7 @@ jobs:
         with:
           creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.M21_DEVELOPMENT_CONTAINERAPPBOTRELEASESP }}
 
-      - name: Emergency Revision Cleanup
-        run: |
-            echo "Performing emergency revision cleanup..."
-            
-            # Get all active revisions
-            ACTIVE_REVISIONS=$(az containerapp revision list \
-              -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              -g ${{ env.RESOURCE_GROUP }} \
-              --query "[?properties.active].{name:name,replicas:properties.replicas}" -o json)
-            
-            # Count active revisions
-            ACTIVE_COUNT=$(echo "$ACTIVE_REVISIONS" | jq length)
-            
-            if [ $ACTIVE_COUNT -gt 1 ]; then
-              echo "WARNING: Found $ACTIVE_COUNT active revisions"
-              
-              # Find any revision with more than expected replicas
-              echo "$ACTIVE_REVISIONS" | jq -r '.[]' | while read -r revision; do
-                REPLICA_COUNT=$(echo "$revision" | jq -r '.replicas')
-                REVISION_NAME=$(echo "$revision" | jq -r '.name')
-                
-                if [ $REPLICA_COUNT -gt ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} ]; then
-                  echo "Found revision $REVISION_NAME with $REPLICA_COUNT replicas (exceeds maximum)"
-                  
-                  # Force update the replica count
-                  az containerapp revision deactivate \
-                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision "$REVISION_NAME"
-                  
-                  echo "Deactivated revision $REVISION_NAME"
-                fi
-              done
-            fi
+
   
   # Add this right after the Azure Login step and before the Clean up old revisions step
       - name: Set deployment info
@@ -168,7 +135,89 @@ jobs:
             echo "EVENT_NAME: ${{ github.event_name }}"
             echo "REF: ${{ github.ref }}"
             echo "=========================="
-  
+            - name: Emergency Revision Cleanup
+            run: |
+              echo "Performing emergency revision cleanup..."
+              
+              # Add error handling for Azure CLI commands
+              if ! ACTIVE_REVISIONS=$(az containerapp revision list \
+                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                -g ${{ env.RESOURCE_GROUP }} \
+                --query "[?properties.active].{name:name,replicas:properties.replicas}" -o json 2>/dev/null); then
+                echo "Error fetching revisions. Continuing with deployment..."
+                exit 0
+              fi
+              
+              # Count active revisions
+              ACTIVE_COUNT=$(echo "$ACTIVE_REVISIONS" | jq length)
+              echo "Found $ACTIVE_COUNT active revisions"
+              
+              if [ $ACTIVE_COUNT -gt 1 ]; then
+                echo "WARNING: Multiple active revisions detected"
+                
+                # Find and handle revisions with high replica counts
+                echo "$ACTIVE_REVISIONS" | jq -c '.[]' | while read -r revision; do
+                  REPLICA_COUNT=$(echo "$revision" | jq -r '.replicas')
+                  REVISION_NAME=$(echo "$revision" | jq -r '.name')
+                  
+                  echo "Checking revision: $REVISION_NAME (replicas: $REPLICA_COUNT)"
+                  
+                  if [ "$REPLICA_COUNT" -gt "${{ steps.set_deployment_info.outputs.MAX_REPLICAS }}" ]; then
+                    echo "Deactivating revision with excessive replicas: $REVISION_NAME"
+                    
+                    # Add error handling for deactivation
+                    if az containerapp revision deactivate \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$REVISION_NAME" 2>/dev/null; then
+                      echo "Successfully deactivated revision: $REVISION_NAME"
+                    else
+                      echo "Failed to deactivate revision: $REVISION_NAME"
+                    fi
+                  fi
+                done
+              else
+                echo "No problematic revisions found."
+              fi
+    
+      - name: Clean up old revisions
+        run: |
+              echo "Cleaning up old revisions..."
+              
+              # Get all revisions with error handling
+              if ! REVISIONS=$(az containerapp revision list \
+                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                -g ${{ env.RESOURCE_GROUP }} \
+                --query "[].{name:name,active:properties.active}" -o json); then
+                echo "Error fetching revisions. Continuing with deployment..."
+                exit 0
+              fi
+              
+              # Count active revisions
+              ACTIVE_COUNT=$(echo "$REVISIONS" | jq '[.[] | select(.active == true)] | length')
+              
+              if [ $ACTIVE_COUNT -gt 0 ]; then
+                echo "Found $ACTIVE_COUNT active revisions. Deactivating all except latest..."
+                
+                # Get latest revision name
+                LATEST_REVISION=$(echo "$REVISIONS" | jq -r '[.[] | select(.active == true)] | sort_by(.name) | last.name')
+                
+                # Deactivate all revisions except latest
+                echo "$REVISIONS" | jq -r '.[] | select(.active == true) | .name' | while read -r revision; do
+                  if [ "$revision" != "$LATEST_REVISION" ]; then
+                    echo "Deactivating revision: $revision"
+                    if az containerapp revision deactivate \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --revision "$revision" 2>/dev/null; then
+                      echo "Successfully deactivated revision: $revision"
+                    else
+                      echo "Failed to deactivate revision: $revision"
+                    fi
+                  fi
+                done
+              fi
+    
 
 
       - name: Set Development Scale Rule
