@@ -179,10 +179,12 @@ jobs:
                   echo "Waiting for deactivation to complete..."
                   sleep 30
     
-                  # Set deployment timestamp
-                  DEPLOYMENT_TIME=$(date +%s)
+                  # Calculate the cron schedule for 1 hour from now
+                  HOUR=$(date -d "+1 hour" +%H)
+                  MINUTE=$(date +%M)
+                  CRON_SCHEDULE="$MINUTE $HOUR * * *"
                   
-                  # Create new revision using update command with scale rules
+                  # Create new revision using update command
                   echo "Creating new revision..."
                   if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
                     # Production deployment - use standard scaling
@@ -207,7 +209,7 @@ jobs:
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
                   else
-                    # Development deployment - use KEDA time-based scaling
+                    # Development deployment - use cron-based scaling
                     az containerapp update \
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -218,9 +220,9 @@ jobs:
                       --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                       --cpu 0.5 \
                       --memory 1.0Gi \
-                      --scale-rule-name "time-trigger" \
-                      --scale-rule-type custom \
-                      --scale-rule-metadata "start=${DEPLOYMENT_TIME} timeWindow=1h desiredReplicas=1" \
+                      --scale-rule-name "scale-down-rule" \
+                      --scale-rule-type cron \
+                      --scale-rule-metadata "timezone=UTC desiredReplicas=0 start=$CRON_SCHEDULE" \
                       --set-env-vars \
                         RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                         STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -228,13 +230,6 @@ jobs:
                         BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
-                        
-                    # After 1 hour, update to allow scale to zero
-                    (sleep 3600 && \
-                    az containerapp update \
-                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --min-replicas 0) &
                   fi
                   
       - name: Verify Deployment
