@@ -179,15 +179,32 @@ jobs:
                   echo "Waiting for deactivation to complete..."
                   sleep 30
     
-                  # Calculate the cron schedule for 1 hour from now
-                  HOUR=$(date -d "+1 hour" +%H)
-                  MINUTE=$(date +%M)
-                  CRON_SCHEDULE="$MINUTE $HOUR * * *"
+                  # Calculate scale down time (15 minutes from now)
+                  CURRENT_MINUTE=$(date +%M)
+                  CURRENT_HOUR=$(date +%H)
+                  
+                  # Add 15 minutes to current time
+                  SCALE_MINUTE=$((CURRENT_MINUTE + 15))
+                  SCALE_HOUR=$CURRENT_HOUR
+                  
+                  # Handle minute rollover
+                  if [ $SCALE_MINUTE -ge 60 ]; then
+                    SCALE_MINUTE=$((SCALE_MINUTE - 60))
+                    SCALE_HOUR=$((SCALE_HOUR + 1))
+                  fi
+                  
+                  # Handle hour rollover
+                  if [ $SCALE_HOUR -ge 24 ]; then
+                    SCALE_HOUR=$((SCALE_HOUR - 24))
+                  fi
+                  
+                  START_CRON="$SCALE_MINUTE $SCALE_HOUR * * *"
+                  echo "Scale down scheduled for: $START_CRON"
                   
                   # Create new revision using update command
                   echo "Creating new revision..."
                   if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" == "true" ]; then
-                    # Production deployment - use standard scaling
+                    # Production deployment
                     az containerapp update \
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -198,7 +215,7 @@ jobs:
                       --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                       --cpu 0.5 \
                       --memory 1.0Gi \
-                      --scale-rule-name "http-rule" \
+                      --scale-rule-name "http-scale" \
                       --scale-rule-type http \
                       --scale-rule-metadata "concurrent-requests=100" \
                       --set-env-vars \
@@ -209,7 +226,7 @@ jobs:
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
                   else
-                    # Development deployment - use cron-based scaling
+                    # Development deployment
                     az containerapp update \
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -220,9 +237,9 @@ jobs:
                       --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                       --cpu 0.5 \
                       --memory 1.0Gi \
-                      --scale-rule-name "scale-down-rule" \
+                      --scale-rule-name "scale-to-zero" \
                       --scale-rule-type cron \
-                      --scale-rule-metadata "timezone=UTC desiredReplicas=0 start=$CRON_SCHEDULE" \
+                      --scale-rule-metadata "timezone=UTC start=$START_CRON desiredReplicas=0" \
                       --set-env-vars \
                         RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                         STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -230,6 +247,19 @@ jobs:
                         BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+    
+                  # For development environments, verify the deployment
+                  if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
+                    echo "Verifying deployment..."
+                    echo "Scale down scheduled for: $START_CRON UTC"
+                    
+                    SCALE_CONFIG=$(az containerapp show \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --query "properties.template.scale" -o json)
+                    
+                    echo "Current scale configuration:"
+                    echo "$SCALE_CONFIG"
                   fi
                   
       - name: Verify Deployment
