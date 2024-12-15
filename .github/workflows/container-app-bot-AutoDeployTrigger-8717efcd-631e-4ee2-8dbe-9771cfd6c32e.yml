@@ -216,9 +216,6 @@ jobs:
                       --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                       --cpu 0.5 \
                       --memory 1.0Gi \
-                      --scale-rule-name "http-scale" \
-                      --scale-rule-type http \
-                      --scale-rule-metadata "concurrent-requests=100" \
                       --set-env-vars \
                         RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                         STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -227,7 +224,7 @@ jobs:
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
                   else
-                    # Development deployment
+                    # Development deployment - Initial update
                     az containerapp update \
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -246,32 +243,24 @@ jobs:
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
-                    # Add scale rules after initial deployment
-                    echo "Adding scale rules..."
+                    # Add HTTP scale rule
+                    echo "Adding HTTP scale rule..."
                     az containerapp update \
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --scale-rule '[
-                        {
-                          "name": "http-rule",
-                          "http": {
-                            "metadata": {
-                              "concurrentRequests": "100"
-                            }
-                          }
-                        },
-                        {
-                          "name": "scale-to-zero",
-                          "custom": {
-                            "metadata": {
-                              "start": "'$START_CRON'",
-                              "timezone": "UTC",
-                              "desiredReplicas": "0"
-                            },
-                            "type": "cron"
-                          }
-                        }
-                      ]'
+                      --scale-rule-name http-scale \
+                      --scale-rule-type http \
+                      --scale-rule-http-concurrency 100
+    
+                    # Add cron scale rule
+                    echo "Adding cron scale rule..."
+                    sleep 10  # Brief pause between updates
+                    az containerapp update \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --scale-rule-name scale-to-zero \
+                      --scale-rule-type cron \
+                      --scale-rule-metadata "start=$START_CRON timezone=UTC desiredReplicas=0"
                   fi
     
                   # For development environments, verify the deployment
