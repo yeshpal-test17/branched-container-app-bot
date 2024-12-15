@@ -238,9 +238,6 @@ jobs:
                       --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
                       --cpu 0.5 \
                       --memory 1.0Gi \
-                      --scale-rule-name "scale-to-zero" \
-                      --scale-rule-type cron \
-                      --scale-rule-metadata "http-rule-concurrent-requests=100 http-rule-type=http cron-rule-start=$START_CRON cron-rule-timezone=UTC cron-rule-desiredReplicas=0" \
                       --set-env-vars \
                         RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                         STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -248,6 +245,33 @@ jobs:
                         BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+    
+                    # Add scale rules after initial deployment
+                    echo "Adding scale rules..."
+                    az containerapp update \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --scale-rule '[
+                        {
+                          "name": "http-rule",
+                          "http": {
+                            "metadata": {
+                              "concurrentRequests": "100"
+                            }
+                          }
+                        },
+                        {
+                          "name": "scale-to-zero",
+                          "custom": {
+                            "metadata": {
+                              "start": "'$START_CRON'",
+                              "timezone": "UTC",
+                              "desiredReplicas": "0"
+                            },
+                            "type": "cron"
+                          }
+                        }
+                      ]'
                   fi
     
                   # For development environments, verify the deployment
