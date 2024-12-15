@@ -152,6 +152,8 @@ jobs:
 
 
       
+
+      
       - name: Deploy Container App
         run: |
           # Get timestamp for new revision
@@ -168,47 +170,38 @@ jobs:
           
           if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
             # For non-prod environments, create scale rules
-            SCALE_RULES=$(cat << EOF
-            [
-              {
-                "name": "scale-to-zero",
-                "custom": {
-                  "type": "cron",
-                  "metadata": {
-                    "start": "$START_CRON",
-                    "timezone": "UTC",
-                    "desiredReplicas": "0"
+            cat > scale-rules.json << EOF
+          {
+            "scale": {
+              "minReplicas": 1,
+              "maxReplicas": ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }},
+              "rules": [
+                {
+                  "name": "scale-to-zero",
+                  "custom": {
+                    "type": "cron",
+                    "metadata": {
+                      "start": "$START_CRON",
+                      "timezone": "UTC",
+                      "desiredReplicas": "0"
+                    }
                   }
                 }
-              }
-            ]
+              ]
+            }
+          }
           EOF
-                      )
-            
-            # Save scale rules to a file
-            echo "$SCALE_RULES" > scale-rules.json
-            
-            # Initial deployment with no replicas to force clean state
-            az containerapp update \
-              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --remove scale
-            
-            # Wait for scale removal
-            sleep 30
             
             # Main deployment with scale rules
             az containerapp update \
               --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RESOURCE_GROUP }} \
               --revision-suffix "${REVISION_SUFFIX}" \
-              --min-replicas 1 \
-              --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+              --yaml scale-rules.json \
               --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
               --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
               --cpu 0.5 \
               --memory 1.0Gi \
-              --scale-rule-json "@scale-rules.json" \
               --revision-mode Single \
               --set-env-vars \
                 RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
@@ -240,6 +233,9 @@ jobs:
           fi
           
           # Force cleanup of old revisions
+          echo "Cleaning up old revisions..."
+          sleep 30  # Wait for new revision to be fully active
+          
           REVISIONS=$(az containerapp revision list \
             -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             -g ${{ env.RESOURCE_GROUP }} \
@@ -258,7 +254,7 @@ jobs:
           fi
                   
 
-          
+
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
