@@ -154,6 +154,7 @@ jobs:
       
 
       
+
       - name: Deploy Container App
         run: |
           # Get timestamp for new revision
@@ -202,7 +203,6 @@ jobs:
               --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
               --cpu 0.5 \
               --memory 1.0Gi \
-              --revision-mode Single \
               --set-env-vars \
                 RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                 STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -210,6 +210,13 @@ jobs:
                 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                 API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                 API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+
+            # Set active revisions mode to Single after deployment
+            echo "Setting active revisions mode to Single..."
+            az containerapp update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --active-revisions-mode single
           else
             # Production deployment without scale rules
             az containerapp update \
@@ -222,7 +229,6 @@ jobs:
               --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
               --cpu 0.5 \
               --memory 1.0Gi \
-              --revision-mode Single \
               --set-env-vars \
                 RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                 STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -230,6 +236,13 @@ jobs:
                 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                 API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                 API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+
+            # Set active revisions mode to Single after deployment
+            echo "Setting active revisions mode to Single..."
+            az containerapp update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --active-revisions-mode single
           fi
           
           # Force cleanup of old revisions
