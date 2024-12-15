@@ -150,118 +150,115 @@ jobs:
             --file Dockerfile \
             .
 
+
+      
       - name: Deploy Container App
         run: |
-                  # Get timestamp for new revision
-                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                  REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+          # Get timestamp for new revision
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+          
+          # Calculate scale down time (15 minutes from now)
+          SCALE_MINUTE=$((($(date +%M) + 15) % 60))
+          SCALE_HOUR=$(($(date +%H) + ($(date +%M) + 15) / 60))
+          SCALE_HOUR=$((SCALE_HOUR % 24))
+          START_CRON="$SCALE_MINUTE $SCALE_HOUR * * *"
+          
+          echo "Scale down scheduled for: $START_CRON UTC"
+          
+          if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
+            # For non-prod environments, create scale rules
+            SCALE_RULES=$(cat << EOF
+            [
+              {
+                "name": "scale-to-zero",
+                "custom": {
+                  "type": "cron",
+                  "metadata": {
+                    "start": "$START_CRON",
+                    "timezone": "UTC",
+                    "desiredReplicas": "0"
+                  }
+                }
+              }
+            ]
+          EOF
+                      )
+            
+            # Save scale rules to a file
+            echo "$SCALE_RULES" > scale-rules.json
+            
+            # Initial deployment with no replicas to force clean state
+            az containerapp update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --remove scale
+            
+            # Wait for scale removal
+            sleep 30
+            
+            # Main deployment with scale rules
+            az containerapp update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --revision-suffix "${REVISION_SUFFIX}" \
+              --min-replicas 1 \
+              --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+              --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+              --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+              --cpu 0.5 \
+              --memory 1.0Gi \
+              --scale-rule-json "@scale-rules.json" \
+              --revision-mode Single \
+              --set-env-vars \
+                RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                PYTHONUNBUFFERED=1 \
+                BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+                API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+          else
+            # Production deployment without scale rules
+            az containerapp update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --revision-suffix "${REVISION_SUFFIX}" \
+              --min-replicas 1 \
+              --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+              --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+              --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+              --cpu 0.5 \
+              --memory 1.0Gi \
+              --revision-mode Single \
+              --set-env-vars \
+                RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                PYTHONUNBUFFERED=1 \
+                BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+                API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+          fi
+          
+          # Force cleanup of old revisions
+          REVISIONS=$(az containerapp revision list \
+            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active].name" -o tsv)
+          
+          if [ -n "$REVISIONS" ]; then
+            while IFS= read -r revision; do
+              if [ -n "$revision" ] && [[ "$revision" != *"${REVISION_SUFFIX}"* ]]; then
+                echo "Deactivating old revision: $revision"
+                az containerapp revision deactivate \
+                  --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ env.RESOURCE_GROUP }} \
+                  --revision "$revision"
+              fi
+            done <<< "$REVISIONS"
+          fi
                   
-                  echo "Deactivating all existing revisions..."
-                  # List and deactivate ALL revisions
-                  REVISIONS=$(az containerapp revision list \
-                    -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                    -g ${{ env.RESOURCE_GROUP }} \
-                    --query "[].name" -o tsv)
-                  
-                  if [ -n "$REVISIONS" ]; then
-                    while IFS= read -r revision; do
-                      if [ -n "$revision" ]; then
-                        echo "Deactivating revision: $revision"
-                        az containerapp revision deactivate \
-                          --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                          --resource-group ${{ env.RESOURCE_GROUP }} \
-                          --revision "$revision"
-                      fi
-                    done <<< "$REVISIONS"
-                  fi
-                  
-                  # Wait for deactivation to complete
-                  echo "Waiting for deactivation to complete..."
-                  sleep 30
-    
-                  # Calculate scale down time (15 minutes from now)
-                  CURRENT_MINUTE=$(date +%M)
-                  CURRENT_HOUR=$(date +%H)
-                  
-                  # Add 15 minutes to current time
-                  SCALE_MINUTE=$((CURRENT_MINUTE + 15))
-                  SCALE_HOUR=$CURRENT_HOUR
-                  
-                  # Handle minute rollover
-                  if [ $SCALE_MINUTE -ge 60 ]; then
-                    SCALE_MINUTE=$((SCALE_MINUTE - 60))
-                    SCALE_HOUR=$((SCALE_HOUR + 1))
-                  fi
-                  
-                  # Handle hour rollover
-                  if [ $SCALE_HOUR -ge 24 ]; then
-                    SCALE_HOUR=$((SCALE_HOUR - 24))
-                  fi
-                  
-                  START_CRON="$SCALE_MINUTE $SCALE_HOUR * * *"
-                  echo "Scale down scheduled for: $START_CRON"
-    
-                  # First update: Basic configuration without scale rules
-                  echo "Deploying with initial configuration..."
-                  az containerapp update \
-                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision-suffix "${REVISION_SUFFIX}" \
-                    --min-replicas 1 \
-                    --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                    --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                    --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                    --cpu 0.5 \
-                    --memory 1.0Gi \
-                    --set-env-vars \
-                      RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                      STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                      PYTHONUNBUFFERED=1 \
-                      BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                      API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
-                      API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
-    
-                  # Wait for deployment to stabilize
-                  echo "Waiting for deployment to stabilize..."
-                  sleep 30
-    
-                  if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
-                    echo "Setting scale rules for development environment..."
-                    # Update with scale rules
-                    az containerapp update \
-                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --scale-rule-name scale-to-zero \
-                      --scale-rule-type cron \
-                      --scale-rule-metadata "start=$START_CRON" "timezone=UTC" "desiredReplicas=0"
-    
-                    # Verify deployment and scale rules
-                    echo "Verifying deployment and scale rules..."
-                    
-                    # Verify active revisions
-                    echo "Active revisions:"
-                    az containerapp revision list \
-                      -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      -g ${{ env.RESOURCE_GROUP }} \
-                      --query "[?properties.active].{name:name, active:properties.active}" -o table
-    
-                    # Verify scale configuration
-                    echo "Scale configuration:"
-                    az containerapp show \
-                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --query "properties.template.scale" -o json
-                    
-                    echo "Scale down scheduled for: $START_CRON UTC"
-                  fi
-    
-                  # Update active revisions mode to Single after deployment
-                  echo "Updating to single revision mode..."
-                  az containerapp update \
-                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --active-revisions-mode single
-                  
+
+          
       - name: Verify Deployment
         run: |
               echo "Verifying deployment..."
