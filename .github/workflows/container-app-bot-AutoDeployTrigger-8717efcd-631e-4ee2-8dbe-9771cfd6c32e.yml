@@ -248,6 +248,7 @@ jobs:
                         BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                         API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                         API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+                  fi
     
                   # For development environments, verify the deployment
                   if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
