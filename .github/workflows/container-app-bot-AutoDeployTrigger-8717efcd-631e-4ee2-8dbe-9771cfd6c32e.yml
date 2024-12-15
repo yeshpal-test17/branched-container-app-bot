@@ -154,7 +154,7 @@ jobs:
       
 
       
-
+  
       - name: Deploy Container App
         run: |
           # Get timestamp for new revision
@@ -170,39 +170,20 @@ jobs:
           echo "Scale down scheduled for: $START_CRON UTC"
           
           if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
-            # For non-prod environments, create scale rules
-            cat > scale-rules.json << EOF
-          {
-            "scale": {
-              "minReplicas": 1,
-              "maxReplicas": ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }},
-              "rules": [
-                {
-                  "name": "scale-to-zero",
-                  "custom": {
-                    "type": "cron",
-                    "metadata": {
-                      "start": "$START_CRON",
-                      "timezone": "UTC",
-                      "desiredReplicas": "0"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-          EOF
-            
-            # Main deployment with scale rules
+            # For non-prod environments
             az containerapp update \
               --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RESOURCE_GROUP }} \
               --revision-suffix "${REVISION_SUFFIX}" \
-              --yaml scale-rules.json \
+              --min-replicas 1 \
+              --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
               --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
               --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
               --cpu 0.5 \
               --memory 1.0Gi \
+              --scale-rule-name "scale-to-zero" \
+              --scale-rule-type "custom" \
+              --scale-rule-metadata "type=cron" "start=$START_CRON" "timezone=UTC" "desiredReplicas=0" \
               --set-env-vars \
                 RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                 STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
@@ -210,15 +191,8 @@ jobs:
                 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                 API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                 API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
-
-            # Set active revisions mode to Single after deployment
-            echo "Setting active revisions mode to Single..."
-            az containerapp update \
-              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --active-revisions-mode single
           else
-            # Production deployment without scale rules
+            # Production deployment
             az containerapp update \
               --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -236,16 +210,9 @@ jobs:
                 BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
                 API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                 API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
-
-            # Set active revisions mode to Single after deployment
-            echo "Setting active revisions mode to Single..."
-            az containerapp update \
-              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --active-revisions-mode single
           fi
           
-          # Force cleanup of old revisions
+          # Force cleanup of old revisions after new deployment
           echo "Cleaning up old revisions..."
           sleep 30  # Wait for new revision to be fully active
           
