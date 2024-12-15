@@ -240,7 +240,7 @@ jobs:
                       --memory 1.0Gi \
                       --scale-rule-name "scale-to-zero" \
                       --scale-rule-type cron \
-                      --scale-rule-metadata "timezone=UTC start=$START_CRON desiredReplicas=0" \
+                      --scale-rule-metadata "http-rule-concurrent-requests=100 http-rule-type=http cron-rule-start=$START_CRON cron-rule-timezone=UTC cron-rule-desiredReplicas=0" \
                       --set-env-vars \
                         RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                         STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
