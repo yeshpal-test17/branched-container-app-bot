@@ -169,9 +169,11 @@ jobs:
               START_CRON="$SCALE_MINUTE $SCALE_HOUR * * *"
               
               echo "Scale down scheduled for: $START_CRON UTC"
+              echo "Starting deployment for revision: ${REVISION_SUFFIX}"
               
               if [ "${{ steps.set_deployment_info.outputs.IS_PROD }}" != "true" ]; then
                 # For non-prod environments - first deploy without scale rules
+                echo "Deploying non-prod environment..."
                 az containerapp update \
                   --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                   --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -190,8 +192,27 @@ jobs:
                     API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
                     API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
     
-                echo "Waiting for deployment to stabilize before applying scale rules..."
-                sleep 30
+                echo "Waiting for initial deployment to stabilize..."
+                for i in {1..6}; do
+                  echo "Checking deployment status (attempt $i)..."
+                  DEPLOYMENT_STATUS=$(az containerapp revision list \
+                    -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                    -g ${{ env.RESOURCE_GROUP }} \
+                    --query "[?contains(name, '${REVISION_SUFFIX}')].{Status:properties.status}" -o tsv)
+                  
+                  if [ "$DEPLOYMENT_STATUS" == "Running" ]; then
+                    echo "✅ Deployment is running"
+                    break
+                  fi
+                  
+                  if [ $i -eq 6 ]; then
+                    echo "❌ Deployment failed to stabilize"
+                    exit 1
+                  fi
+                  
+                  echo "Waiting for deployment to stabilize..."
+                  sleep 30
+                done
     
                 # Then apply scale rules in a separate update
                 echo "Applying scale rules..."
@@ -206,6 +227,7 @@ jobs:
                     "desiredReplicas=0"
               else
                 # Production deployment without scale rules
+                echo "Deploying production environment..."
                 az containerapp update \
                   --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                   --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -225,33 +247,60 @@ jobs:
                     API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
               fi
               
-              # Force cleanup of old revisions after new deployment
-              echo "Cleaning up old revisions..."
-              sleep 30  # Wait for new revision to be fully active
+              # Verify deployment
+              echo "Verifying deployment..."
+              MAX_RETRIES=6
+              RETRY_COUNT=0
               
-              REVISIONS=$(az containerapp revision list \
-                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].name" -o tsv)
-              
-              if [ -n "$REVISIONS" ]; then
-                while IFS= read -r revision; do
-                  if [ -n "$revision" ] && [[ "$revision" != *"${REVISION_SUFFIX}"* ]]; then
-                    echo "Deactivating old revision: $revision"
-                    az containerapp revision deactivate \
-                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                      --resource-group ${{ env.RESOURCE_GROUP }} \
-                      --revision "$revision"
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                echo "Verification attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES"
+                
+                ACTIVE_REVISIONS=$(az containerapp revision list \
+                  -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  -g ${{ env.RESOURCE_GROUP }} \
+                  --query "[?properties.active].{name:name, status:properties.status, replicas:properties.replicas}" -o json)
+                
+                echo "Current active revisions:"
+                echo "$ACTIVE_REVISIONS" | jq '.'
+                
+                # Check if our new revision exists and is active
+                if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"${REVISION_SUFFIX}\"))" > /dev/null; then
+                  echo "✅ Deployment verified successfully"
+                  REVISION_STATUS=$(echo "$ACTIVE_REVISIONS" | jq -r ".[] | select(.name | contains(\"${REVISION_SUFFIX}\")).status")
+                  echo "New revision status: $REVISION_STATUS"
+                  
+                  # Only proceed with cleanup if the new revision is active
+                  if [ "$REVISION_STATUS" == "Running" ]; then
+                    echo "Cleaning up old revisions..."
+                    while IFS= read -r revision; do
+                      if [ -n "$revision" ] && [[ "$revision" != *"${REVISION_SUFFIX}"* ]]; then
+                        echo "Deactivating old revision: $revision"
+                        az containerapp revision deactivate \
+                          --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                          --resource-group ${{ env.RESOURCE_GROUP }} \
+                          --revision "$revision"
+                      fi
+                    done <<< "$(echo "$ACTIVE_REVISIONS" | jq -r '.[].name')"
+                    break
                   fi
-                done <<< "$REVISIONS"
-              fi
-    
-              # Verify deployment and scale rules
-              echo "Verifying deployment configuration..."
+                fi
+                
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                  echo "❌ Deployment verification failed after $MAX_RETRIES attempts"
+                  exit 1
+                fi
+                
+                echo "Waiting 30 seconds before next verification attempt..."
+                sleep 30
+              done
+              
+              # Final configuration verification
+              echo "Verifying final configuration..."
               az containerapp show \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
-                --query "properties.template.scale" -o json
+                --query "{scale:properties.template.scale, activeRevisionMode:properties.configuration.activeRevisionsMode}" -o json
                   
 
 
