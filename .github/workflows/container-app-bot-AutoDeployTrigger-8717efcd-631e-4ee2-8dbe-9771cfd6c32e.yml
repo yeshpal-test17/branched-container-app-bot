@@ -155,6 +155,7 @@ jobs:
 
       
   
+    
       - name: Deploy Container App
         run: |
           # Get timestamp for new revision
@@ -182,8 +183,8 @@ jobs:
               --cpu 0.5 \
               --memory 1.0Gi \
               --scale-rule-name "scale-to-zero" \
-              --scale-rule-type "custom" \
-              --scale-rule-metadata "type=cron" "start=$START_CRON" "timezone=UTC" "desiredReplicas=0" \
+              --scale-rule-type "cron" \
+              --scale-rule-metadata "start=$START_CRON" "timezone=UTC" "desiredReplicas=0" \
               --set-env-vars \
                 RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
                 STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
