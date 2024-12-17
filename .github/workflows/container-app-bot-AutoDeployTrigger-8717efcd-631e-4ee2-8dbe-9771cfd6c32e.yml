@@ -194,13 +194,10 @@ jobs:
           az containerapp update \
             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --set "template.scale.rules[0].name=timer-scale-down" \
-            --set "template.scale.rules[0].type=cron" \
-            --set "template.scale.rules[0].metadata.start=00:00" \
-            --set "template.scale.rules[0].metadata.end=23:59" \
-            --set "template.scale.rules[0].metadata.timezone=UTC" \
-            --set "template.scale.rules[0].metadata.schedule=*/10 * * * *" \
-            --set "template.scale.rules[0].metadata.replicaCount=0"
+            --scale-rule-name timer-scale-down \
+            --scale-rule-type cron \
+            --scale-rule-auth start="00:00" end="23:59" timezone="UTC" \
+            --scale-rule-metadata schedule="*/10 * * * *" replicaCount="0"
 
           
     
