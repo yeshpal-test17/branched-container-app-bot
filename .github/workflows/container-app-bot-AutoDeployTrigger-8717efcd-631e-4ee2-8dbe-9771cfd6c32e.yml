@@ -192,17 +192,41 @@ jobs:
         run: |
 
           echo "Setting up timer-based scaling rule..."
+          
+          # Create a JSON file with the scaling rule configuration
+          cat > scale-rule.json << EOF
+          {
+            "properties": {
+              "template": {
+                "scale": {
+                  "minReplicas": 0,
+                  "maxReplicas": 5,
+                  "rules": [
+                    {
+                      "name": "timer-scale-down",
+                      "custom": {
+                        "type": "cron",
+                        "metadata": {
+                          "schedule": "*/10 * * * *",
+                          "replicaCount": "0",
+                          "timezone": "UTC",
+                          "start": "00:00",
+                          "end": "23:59"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+          
+          # Apply the configuration
           az containerapp update \
             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --set \
-            'properties.template.scale.rules[0].name=timer-scale-down' \
-            'properties.template.scale.rules[0].custom.type=cron' \
-            'properties.template.scale.rules[0].custom.metadata.schedule=*/10 * * * *' \
-            'properties.template.scale.rules[0].custom.metadata.replicaCount=0' \
-            'properties.template.scale.rules[0].custom.metadata.timezone=UTC' \
-            'properties.template.scale.rules[0].custom.metadata.start=00:00' \
-            'properties.template.scale.rules[0].custom.metadata.end=23:59'
+            --patch @scale-rule.json
 
           
     
