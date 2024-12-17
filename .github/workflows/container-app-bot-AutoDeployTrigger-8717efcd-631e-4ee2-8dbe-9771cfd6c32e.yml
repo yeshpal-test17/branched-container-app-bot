@@ -195,13 +195,14 @@ jobs:
                       --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                       --resource-group ${{ env.RESOURCE_GROUP }} \
                       --scale-rule-name timer-scale-down \
-                      --scale-rule-type custom \
+                      --scale-rule-type cron \
+                      --scale-rule-auth \
+                        start="00:00" \
+                        end="23:59" \
+                        timezone="UTC" \
                       --scale-rule-metadata \
-                        'end=23:59' \
-                        'start=00:00' \
-                        'timezone=UTC' \
-                        'schedule=*/10 * * * *' \
-                        'replicaCount=0'
+                        schedule="*/10 * * * *" \
+                        replicaCount="0"
 
           
     
