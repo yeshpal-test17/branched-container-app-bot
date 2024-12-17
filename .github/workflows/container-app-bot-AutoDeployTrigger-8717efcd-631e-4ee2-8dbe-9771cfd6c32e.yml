@@ -190,11 +190,19 @@ jobs:
     
       - name: Set Timer-Based Scaling Rule
         run: |
+
           echo "Setting up timer-based scaling rule..."
           az containerapp update \
             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --set-scale-rule-cron "timer-scale-down" "0" "*/10 * * * *" "UTC"
+            --set \
+            'properties.template.scale.rules[0].name=timer-scale-down' \
+            'properties.template.scale.rules[0].custom.type=cron' \
+            'properties.template.scale.rules[0].custom.metadata.schedule=*/10 * * * *' \
+            'properties.template.scale.rules[0].custom.metadata.replicaCount=0' \
+            'properties.template.scale.rules[0].custom.metadata.timezone=UTC' \
+            'properties.template.scale.rules[0].custom.metadata.start=00:00' \
+            'properties.template.scale.rules[0].custom.metadata.end=23:59'
 
           
     
