@@ -190,13 +190,18 @@ jobs:
     
       - name: Set Timer-Based Scaling Rule
         run: |
-                echo "Setting up timer-based scaling rule..."
-                az containerapp update \
-                  --name m21-development \
-                  --resource-group container-app-rsgp \
-                  --scale-rule-name timer-scale-down \
-                  --scale-rule-type cron \
-                  --scale-rule-metadata "schedule=*/10 * * * *"
+                    echo "Setting up timer-based scaling rule..."
+                    az containerapp update \
+                      --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                      --resource-group ${{ env.RESOURCE_GROUP }} \
+                      --scale-rule-name timer-scale-down \
+                      --scale-rule-type cron \
+                      --scale-rule-metadata \
+                        "timezone=UTC" \
+                        "schedule=*/10 * * * *" \
+                        "start=0 0 * * *" \
+                        "end=23 59 * * *" \
+                        "replicaCount=0"
 
           
     
