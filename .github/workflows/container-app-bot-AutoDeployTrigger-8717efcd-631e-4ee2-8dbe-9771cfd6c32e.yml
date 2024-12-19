@@ -173,7 +173,7 @@ jobs:
           
           # Wait for deactivation to complete
           echo "Waiting for deactivation to complete..."
-          sleep 30
+          sleep 15
           
           # Create new revision using update command
           echo "Creating new revision..."
@@ -234,7 +234,7 @@ jobs:
           echo "Verifying deployment..."
           
           # Wait for deployment to stabilize
-          sleep 90
+          sleep 60
           
           # Get current active revisions
           ACTIVE_REVISIONS=$(az containerapp revision list \
