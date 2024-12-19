@@ -205,27 +205,30 @@ jobs:
       - name: Update replicas to zero
         if: steps.set_deployment_info.outputs.IS_PROD != 'true'
         run: |
-            # Get the current active revision
-            ACTIVE_REVISION=$(az containerapp revision list \
-              -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              -g ${{ env.RESOURCE_GROUP }} \
-              --query "[?properties.active].name" -o tsv | head -n 1)
+            # Get timestamp for new revision
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
             
-            if [ -n "$ACTIVE_REVISION" ]; then
-              echo "Updating min replicas to 0 for revision: $ACTIVE_REVISION"
-              
-              # Update the container app to set min replicas to 0
-              az containerapp update \
-                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --min-replicas 0
-              
-              echo "Successfully updated min replicas to 0"
-            else
-              echo "No active revision found to update"
-              exit 1
-            fi
-                  
+            echo "Updating deployment with min replicas=0..."
+            az containerapp update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --revision-suffix "${REVISION_SUFFIX}" \
+              --min-replicas 0 \
+              --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+              --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+              --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+              --cpu 0.5 \
+              --memory 1.0Gi \
+              --set-env-vars \
+                RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+                STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+                PYTHONUNBUFFERED=1 \
+                BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+                API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+                API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
+           
+                
       - name: Verify Deployment
         run: |
           echo "Verifying deployment..."
