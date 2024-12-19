@@ -201,30 +201,31 @@ jobs:
           echo "Waiting for 20 minutes to allow testing..."
           sleep 1200
 
+
       - name: Update replicas to zero
         if: steps.set_deployment_info.outputs.IS_PROD != 'true'
         run: |
-          # Get the current active revision
-          ACTIVE_REVISION=$(az containerapp revision list \
-            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-            -g ${{ env.RESOURCE_GROUP }} \
-            --query "[?properties.active].name" -o tsv | head -n 1)
-          
-          if [ -n "$ACTIVE_REVISION" ]; then
-            echo "Updating min replicas to 0 for revision: $ACTIVE_REVISION"
+            # Get the current active revision
+            ACTIVE_REVISION=$(az containerapp revision list \
+              -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              -g ${{ env.RESOURCE_GROUP }} \
+              --query "[?properties.active].name" -o tsv | head -n 1)
             
-            # Update the revision to set min replicas to 0
-            az containerapp revision update \
-              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --revision-name "$ACTIVE_REVISION" \
-              --min-replicas 0
-            
-            echo "Successfully updated min replicas to 0"
-          else
-            echo "No active revision found to update"
-            exit 1
-          fi
+            if [ -n "$ACTIVE_REVISION" ]; then
+              echo "Updating min replicas to 0 for revision: $ACTIVE_REVISION"
+              
+              # Update the revision configuration to set min replicas to 0
+              az containerapp revision update-configuration \
+                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --revision-name "$ACTIVE_REVISION" \
+                --min-replicas 0
+              
+              echo "Successfully updated min replicas to 0"
+            else
+              echo "No active revision found to update"
+              exit 1
+            fi
                   
       - name: Verify Deployment
         run: |
