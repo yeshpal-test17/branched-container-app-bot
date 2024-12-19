@@ -199,7 +199,7 @@ jobs:
         if: steps.set_deployment_info.outputs.IS_PROD != 'true'
         run: |
           echo "Waiting for 5 minutes to allow testing..."
-          sleep 0
+          sleep 30
 
 
       - name: Update replicas to zero
