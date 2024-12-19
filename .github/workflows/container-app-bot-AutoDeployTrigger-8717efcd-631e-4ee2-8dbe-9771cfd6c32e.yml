@@ -31,7 +31,6 @@ jobs:
         with:
           creds: ${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && secrets.AZURE_CREDENTIALS_M21LIVE || secrets.M21_DEVELOPMENT_CONTAINERAPPBOTRELEASESP }}
 
-
       - name: Set deployment info
         id: set_deployment_info
         run: |
@@ -62,7 +61,6 @@ jobs:
           else
             BRANCH_REF="${{ github.ref }}"
           fi
-
           
           # Set environment variables based on branch
           case "$BRANCH_REF" in
@@ -73,7 +71,7 @@ jobs:
               echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
               echo "IS_PROD=false" >> $GITHUB_OUTPUT
               echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-              echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=1" >> $GITHUB_OUTPUT
               echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
               ;;
             "refs/heads/test")
@@ -83,7 +81,7 @@ jobs:
               echo "IMAGE_TAG=test-latest" >> $GITHUB_OUTPUT
               echo "IS_PROD=false" >> $GITHUB_OUTPUT
               echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-              echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=1" >> $GITHUB_OUTPUT
               echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
               ;;
             "refs/heads/master")
@@ -93,7 +91,7 @@ jobs:
               echo "IMAGE_TAG=staging-latest" >> $GITHUB_OUTPUT
               echo "IS_PROD=false" >> $GITHUB_OUTPUT
               echo "CONTAINER_APP_NAME=${{ env.BRANCHED_CONTAINER_APP_NAME }}" >> $GITHUB_OUTPUT
-              echo "MIN_REPLICAS=0" >> $GITHUB_OUTPUT
+              echo "MIN_REPLICAS=1" >> $GITHUB_OUTPUT
               echo "MAX_REPLICAS=5" >> $GITHUB_OUTPUT
               ;;
             "refs/heads/prod")
@@ -121,7 +119,6 @@ jobs:
             echo "RELEASE_TAG=manual-trigger" >> $GITHUB_OUTPUT
           fi
 
-
           echo "=== Deployment Information ==="
           echo "STAGE: ${{ steps.set_deployment_info.outputs.STAGE }}"
           echo "CONTAINER_NAME: ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}"
@@ -132,8 +129,6 @@ jobs:
           echo "EVENT_NAME: ${{ github.event_name }}"
           echo "REF: ${{ github.ref }}"
           echo "=========================="
-
-
 
       - name: Build and push image to ACR
         run: |
@@ -152,117 +147,116 @@ jobs:
 
       - name: Deploy Container App
         run: |
-              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-              REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
-    
-              # Deactivate existing revisions
-              ACTIVE_REVISIONS=$(az containerapp revision list \
-                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].name" -o tsv)
-              
-              if [ -n "$ACTIVE_REVISIONS" ]; then
-                while IFS= read -r revision; do
-                  az containerapp revision deactivate \
-                    --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                    --resource-group ${{ env.RESOURCE_GROUP }} \
-                    --revision "$revision"
-                done <<< "$ACTIVE_REVISIONS"
+          # Get timestamp for new revision
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          REVISION_SUFFIX="${{ steps.set_deployment_info.outputs.STAGE }}-${TIMESTAMP}"
+          
+          echo "Deactivating existing revisions..."
+          # List all active revisions
+          ACTIVE_REVISIONS=$(az containerapp revision list \
+            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active].name" -o tsv)
+          
+          # Deactivate each revision
+          if [ -n "$ACTIVE_REVISIONS" ]; then
+            while IFS= read -r revision; do
+              if [ -n "$revision" ]; then
+                echo "Deactivating revision: $revision"
+                az containerapp revision deactivate \
+                  --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+                  --resource-group ${{ env.RESOURCE_GROUP }} \
+                  --revision "$revision"
               fi
-    
-              # Deploy new revision
-              az containerapp update \
-                --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                --resource-group ${{ env.RESOURCE_GROUP }} \
-                --revision-suffix "$REVISION_SUFFIX" \
-                --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
-                --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
-                --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
-                --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
-                --cpu 0.5 \
-                --memory 1.0Gi \
-                --set-env-vars \
-                  RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
-                  STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
-                  BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
-                  API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
-                  API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
-    
-      - name: Set Timer-Based Scaling Rule
-        run: |
-
-          echo "Setting up timer-based scaling rule..."
+            done <<< "$ACTIVE_REVISIONS"
+          fi
           
-          # Create a JSON file with the scaling rule configuration
-          cat > scale-rule.json << EOF
-          {
-            "properties": {
-              "template": {
-                "scale": {
-                  "minReplicas": 0,
-                  "maxReplicas": 5,
-                  "rules": [
-                    {
-                      "name": "timer-scale-down",
-                      "custom": {
-                        "type": "cron",
-                        "metadata": {
-                          "schedule": "*/10 * * * *",
-                          "replicaCount": "0",
-                          "timezone": "UTC",
-                          "start": "00:00",
-                          "end": "23:59"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-          EOF
+          # Wait for deactivation to complete
+          echo "Waiting for deactivation to complete..."
+          sleep 30
           
-          # Apply the configuration
+          # Create new revision using update command
+          echo "Creating new revision..."
           az containerapp update \
             --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --patch @scale-rule.json
+            --revision-suffix "${REVISION_SUFFIX}" \
+            --min-replicas ${{ steps.set_deployment_info.outputs.MIN_REPLICAS }} \
+            --max-replicas ${{ steps.set_deployment_info.outputs.MAX_REPLICAS }} \
+            --container-name ${{ steps.set_deployment_info.outputs.CONTAINER_NAME }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/${{ steps.set_deployment_info.outputs.CONTAINER_NAME }}:${{ steps.set_deployment_info.outputs.IMAGE_TAG }} \
+            --cpu 0.5 \
+            --memory 1.0Gi \
+            --set-env-vars \
+              RELEASE_TAG=${{ steps.set_deployment_info.outputs.RELEASE_TAG }} \
+              STAGE=${{ steps.set_deployment_info.outputs.STAGE }} \
+              PYTHONUNBUFFERED=1 \
+              BOT_TOKEN=secretref:${{ steps.set_deployment_info.outputs.BOT_TOKEN_SECRET }} \
+              API_ID=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apiid' || 'api-id' }} \
+              API_HASH=secretref:${{ steps.set_deployment_info.outputs.IS_PROD == 'true' && 'apihash' || 'api-hash' }}
 
+      - name: Wait for testing period
+        if: steps.set_deployment_info.outputs.IS_PROD != 'true'
+        run: |
+          echo "Waiting for 20 minutes to allow testing..."
+          sleep 1200
+
+      - name: Update replicas to zero
+        if: steps.set_deployment_info.outputs.IS_PROD != 'true'
+        run: |
+          # Get the current active revision
+          ACTIVE_REVISION=$(az containerapp revision list \
+            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active].name" -o tsv | head -n 1)
           
-    
-    
+          if [ -n "$ACTIVE_REVISION" ]; then
+            echo "Updating min replicas to 0 for revision: $ACTIVE_REVISION"
+            
+            # Update the revision to set min replicas to 0
+            az containerapp revision update \
+              --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --revision-name "$ACTIVE_REVISION" \
+              --min-replicas 0
+            
+            echo "Successfully updated min replicas to 0"
+          else
+            echo "No active revision found to update"
+            exit 1
+          fi
                   
       - name: Verify Deployment
         run: |
-              echo "Verifying deployment..."
-              
-              # Wait for deployment to stabilize
-              sleep 90
-              
-              # Get current active revisions
-              ACTIVE_REVISIONS=$(az containerapp revision list \
-                -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
-                -g ${{ env.RESOURCE_GROUP }} \
-                --query "[?properties.active].{name:name, replicas:properties.replicas}" -o json)
-              
-              echo "Current active revisions:"
-              echo "$ACTIVE_REVISIONS" | jq '.'
-              
-              # Define expected values
-              SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.STAGE }}-"
-              
-              echo "Looking for revision with pattern: $SUFFIX_PATTERN"
-              
-              # Verify deployment based only on the revision name pattern
-              if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))" > /dev/null; then
-                echo "✅ Deployment verified successfully"
-                echo "Active revision details:"
-                echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))"
-              else
-                echo "❌ Deployment verification failed"
-                echo "Debug information:"
-                echo "Expected suffix pattern: $SUFFIX_PATTERN"
-                echo "All active revisions:"
-                echo "$ACTIVE_REVISIONS" | jq '.'
-                exit 1
-              fi
+          echo "Verifying deployment..."
+          
+          # Wait for deployment to stabilize
+          sleep 90
+          
+          # Get current active revisions
+          ACTIVE_REVISIONS=$(az containerapp revision list \
+            -n ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
+            -g ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active].{name:name, replicas:properties.replicas}" -o json)
+          
+          echo "Current active revisions:"
+          echo "$ACTIVE_REVISIONS" | jq '.'
+          
+          # Define expected values
+          SUFFIX_PATTERN="${{ steps.set_deployment_info.outputs.STAGE }}-"
+          
+          echo "Looking for revision with pattern: $SUFFIX_PATTERN"
+          
+          # Verify deployment based only on the revision name pattern
+          if echo "$ACTIVE_REVISIONS" | jq -e ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))" > /dev/null; then
+            echo "✅ Deployment verified successfully"
+            echo "Active revision details:"
+            echo "$ACTIVE_REVISIONS" | jq ".[] | select(.name | contains(\"$SUFFIX_PATTERN\"))"
+          else
+            echo "❌ Deployment verification failed"
+            echo "Debug information:"
+            echo "Expected suffix pattern: $SUFFIX_PATTERN"
+            echo "All active revisions:"
+            echo "$ACTIVE_REVISIONS" | jq '.'
+            exit 1
+          fi
