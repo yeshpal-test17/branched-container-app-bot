@@ -214,11 +214,10 @@ jobs:
             if [ -n "$ACTIVE_REVISION" ]; then
               echo "Updating min replicas to 0 for revision: $ACTIVE_REVISION"
               
-              # Update the revision configuration to set min replicas to 0
-              az containerapp revision update-configuration \
+              # Update the container app to set min replicas to 0
+              az containerapp update \
                 --name ${{ steps.set_deployment_info.outputs.CONTAINER_APP_NAME }} \
                 --resource-group ${{ env.RESOURCE_GROUP }} \
-                --revision-name "$ACTIVE_REVISION" \
                 --min-replicas 0
               
               echo "Successfully updated min replicas to 0"
